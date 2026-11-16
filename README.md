@@ -36,14 +36,22 @@ Every company relearns the same lessons. The live chat that failed because nobod
 
 ## Try it (for judges)
 
-1. **Install** the Skeptic from the installation link, on Jira (and on Confluence for the Kestrel Freight demo).
-2. **Load a demo company.** Create an empty Jira project (for example key `KF`) and, for Kestrel Freight, an empty
-   Confluence space. Open **Apps → Manage apps → The Skeptic settings → Demo data**, choose a company and select
-   **Load**. After about two minutes the tab lists the demo plans to open.
-   - **Kestrel Freight** (logistics, with Confluence): the live chat plan repeats an abandoned project and should get
-     strong objections; the night-time colour scheme plan should get none.
-   - **Pinecrest Apps** (software, no Confluence): offline editing failed before; the on-premise plan is matched to an
-     abandoned "self-hosted edition" in different words; the shortcuts page should get none.
+1. **Install** the Skeptic from the installation link, on Jira (and on Confluence for the demo companies that use it).
+2. **Load a demo company.** Create an empty Jira project with the suggested key and, for companies with Confluence, an
+   empty space. Open **Apps → Manage apps → The Skeptic settings → Demo data**, choose a company and select **Load**.
+   After about five minutes the tab lists its three demo plans. Each company has years of history (2021 to 2026, over
+   100 work items: epics with their tasks, incidents and open risks), and its three plans are made for judging: one that
+   **several** history items argue against, one that **a single** item argues against, and one **nothing** should object to.
+
+   | Company | Shape | Several items against | One item against | Nothing against |
+   |---|---|---|---|---|
+   | **Kestrel Freight** (`KF`) | logistics; Epics, Bugs, Confluence | Add live chat to the mobile app | Voice booking for pickups through smart speakers | Night-time colour scheme for the driver app |
+   | **Pinecrest Apps** (`PA`) | notes app; Initiatives, Incidents, no Confluence | Work offline on mobile and sync when back online | On-premise version for banks (matched in different words) | Keyboard shortcuts cheat sheet |
+   | **Harbour & Vine** (`HV`) | restaurants; Epics, Bugs, Confluence | Self-order tablets at every table | Open a delivery-only kitchen brand for late-night orders | Allergen icons on the printed menus |
+   | **Brightwell Learning** (`BL`) | online courses; Epics, Bugs, Confluence | Webcam proctoring for online exams | SMS reminders before every live lecture | Bookmarks inside lecture videos |
+   | **Sunfield Energy** (`SE`) | pay-as-you-go solar; Initiatives, Incidents, no Confluence | Let customers pay their monthly bill with airtime | Solar water pumps for farmers | Referral bonus for customers who bring a neighbour |
+
+   All five can sit on one site: each plan is argued against only with its own company's history.
 3. **Review a plan.** Open a demo plan and the **Skeptic** panel. **Review now** asks the Skeptic agent in Rovo chat;
    **Quick draft from history** needs no AI. Answer an objection, then try moving the plan to In Progress.
 4. **Optional:** background reviews with the automation rule in [`automation/`](automation/), and the workflow validator
@@ -56,7 +64,7 @@ without it.
 
 ```
 npm install
-npm test          # 456 checks in six suites, no Atlassian site needed
+npm test          # 549 checks in six suites, no Atlassian site needed
 forge deploy
 forge install --upgrade   # Jira, then Confluence
 ```
@@ -87,10 +95,10 @@ with `$env:SKEPTIC_DEMO="pinecrest"` for Pinecrest Apps.
 | `src/prompts/skeptic.md` | The agent's instructions |
 | `src/frontend/` | Issue panel, sidebar glance, Confluence byline, dashboard, admin page (UI Kit) |
 | `eval/` | 40 labelled plans, live seeding and scoring |
-| `src/lib/demo/` | The two demo companies and the in-app loader |
+| `src/lib/demo/` | The five demo companies and the in-app loader |
 | `automation/` | The Jira automation rule for background reviews, and how to import it |
 | `seed/` | Scripts that load the demo companies from your computer |
-| `test/` | A fake Atlassian site that behaves like real Jira (strict JQL, permissions); `sim` end-to-end, `ui` screen journeys, `stress` robustness and scale, `features` the newer features, `second-site` a different site, `demo-load` both demo companies on an empty site |
+| `test/` | A fake Atlassian site that behaves like real Jira (strict JQL, permissions); `sim` end-to-end, `ui` screen journeys, `stress` robustness and scale, `features` the newer features, `second-site` a different site, `demo-load` all five demo companies and their judge plans on an empty site |
 
 ## Privacy and terms
 

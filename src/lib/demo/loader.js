@@ -1,22 +1,36 @@
 // Demo companies, loaded from the settings page so anyone who installs the app (judges included) can try
-// it without scripts or API tokens. Two fictional companies with different shapes:
-//   Kestrel Freight  logistics, Epics, Bugs as incidents, Confluence retros and decision records
-//   Pinecrest Apps   software, Initiatives, an Incident type, no Confluence
-// Loading runs in the background (queue jobs, as the app): create the work items in bulk, move history to
-// Done or In Progress and add its comments, create the pages, index everything, then run the radar on the
-// demo plans once the history is in. Safe to run again: items already there (same title) are skipped.
+// it without scripts or API tokens. Five fictional companies, each with years of history (over 100 work
+// items: epics with their tasks, incidents, risks) and differently shaped:
+//   Kestrel Freight      logistics, Epics, Bugs as incidents, Confluence retros and decision records
+//   Pinecrest Apps       software, Initiatives, an Incident type, no Confluence
+//   Harbour & Vine       restaurants, Epics, Bugs, Confluence
+//   Brightwell Learning  online courses, Epics, Bugs, Confluence
+//   Sunfield Energy      pay-as-you-go solar, Initiatives, an Incident type, no Confluence
+// Each company has three demo plans for judges: one that several history items argue against, one that a
+// single item argues against, and one nothing should object to.
+// Loading runs in the background (queue jobs, as the app): create the work items in bulk (epics first, then
+// their tasks under them), move history to Done or In Progress and add its comments, create the pages,
+// index everything, then run the radar on the demo plans once the history is in. Safe to run again: items
+// already there (same title) are skipped.
 import { route } from '@forge/api';
 import { kvs } from '@forge/kvs';
 import { appClient, json, JSON_HEADERS } from '../http';
 import { paragraphsToAdf } from '../text';
 import * as kestrel from './kestrel';
 import * as pinecrest from './pinecrest';
+import * as harbourvine from './harbourvine';
+import * as brightwell from './brightwell';
+import * as sunfield from './sunfield';
 
-export const DEMOS = { kestrel, pinecrest };
+export const DEMOS = { kestrel, pinecrest, harbourvine, brightwell, sunfield };
 export const DEMO_LABEL = 'skeptic-demo';
 const statusKey = (id) => `demo:status:${id}`;
 
-export const getDemoStatus = async () => ({ kestrel: (await kvs.get(statusKey('kestrel'))) || null, pinecrest: (await kvs.get(statusKey('pinecrest'))) || null });
+export const getDemoStatus = async () => {
+  const ids = Object.keys(DEMOS);
+  const all = await Promise.all(ids.map((id) => kvs.get(statusKey(id))));
+  return Object.fromEntries(ids.map((id, i) => [id, all[i] || null]));
+};
 export const setDemoStatus = async (id, patch) => {
   const prev = (await kvs.get(statusKey(id))) || {};
   const next = { ...prev, ...patch, updatedAt: new Date().toISOString() };
@@ -47,6 +61,17 @@ export function demoItems(data, types) {
       to: e.outcome === 'shipped' || e.outcome === 'abandoned' ? 'done' : e.outcome === 'in-progress' ? 'indeterminate' : null,
       comment: e.comment ? `${e.commentBy ? `${e.commentBy}: ` : ''}${e.comment}` : null,
     });
+    // The epic's tasks: finished with it (shipped or abandoned), part done while it is in progress.
+    (e.tasks || []).forEach((t, n) =>
+      items.push({
+        summary: t,
+        text: [`Part of "${e.summary}".`],
+        type: types.task,
+        labels: [DEMO_LABEL, 'skeptic-ignore'],
+        to: e.outcome === 'shipped' || e.outcome === 'abandoned' ? 'done' : e.outcome === 'in-progress' ? (n === 0 ? 'done' : 'indeterminate') : null,
+        parent: e.summary,
+      }),
+    );
   }
   for (const x of data.incidents)
     items.push({ summary: x.summary, text: x.text, type: types.incident || types.task, labels: [DEMO_LABEL, 'skeptic-ignore', ...(types.incident ? [] : ['incident'])], to: 'done' });
@@ -58,7 +83,7 @@ export function demoItems(data, types) {
 async function existingDemoItems(c, projectKey) {
   const out = new Map();
   let token;
-  for (let i = 0; i < 5; i += 1) {
+  for (let i = 0; i < 20; i += 1) {
     const data = await json(
       await c.jira(route`/rest/api/3/search/jql`, {
         method: 'POST',
@@ -75,6 +100,36 @@ async function existingDemoItems(c, projectKey) {
   return out;
 }
 
+// Create work items in bulk, 50 at a time, recording each new key. A task whose parent link is refused
+// (some project types do not allow it) is created again without the link, so loading never stops on it.
+async function createItems(c, projectKey, list, known) {
+  const fieldsFor = (x, withParent) => ({
+    project: { key: projectKey },
+    summary: x.summary,
+    description: paragraphsToAdf(x.text),
+    issuetype: { id: x.type.id },
+    labels: x.labels,
+    ...(x.dueDate ? { duedate: x.dueDate } : {}),
+    ...(withParent && x.parent && known.get(x.parent)?.key ? { parent: { key: known.get(x.parent).key } } : {}),
+  });
+  const send = async (chunk, withParent) => {
+    const raw = await c.jira(route`/rest/api/3/issue/bulk`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ issueUpdates: chunk.map((x) => ({ fields: fieldsFor(x, withParent) })) }) });
+    // When every item fails, Jira answers 400 with the per-item errors. Only a chunk of tasks (a parent
+    // problem) is worth retrying, so anything else still fails loudly.
+    const allTasks = withParent && chunk.every((x) => x.parent);
+    const res = raw?.status === 400 && allTasks ? await raw.json().catch(() => ({})) : await json(raw, 'create demo items');
+    if (raw?.status === 400 && allTasks && !(res.errors || []).length) res.errors = chunk.map((_, j) => ({ failedElementNumber: j }));
+    const failed = new Set((res.errors || []).map((e) => e.failedElementNumber));
+    const created = chunk.filter((_, j) => !failed.has(j));
+    (res.issues || []).forEach((r, j) => created[j] && known.set(created[j].summary, { id: String(r.id), key: r.key, fresh: true }));
+    return chunk.filter((_, j) => failed.has(j));
+  };
+  for (let i = 0; i < list.length; i += 50) {
+    const refused = await send(list.slice(i, i + 50), true);
+    if (refused.some((x) => x.parent)) await send(refused.filter((x) => x.parent), false);
+  }
+}
+
 // Job 1: create what is missing, then queue the follow-ups.
 export async function demoLoad(job, { enqueue, enqueueMany }) {
   const data = DEMOS[job.company];
@@ -87,24 +142,9 @@ export async function demoLoad(job, { enqueue, enqueueMany }) {
   const known = await existingDemoItems(c, job.projectKey);
   const items = demoItems(data, types);
   const missing = items.filter((x) => !known.has(x.summary));
-  for (let i = 0; i < missing.length; i += 50) {
-    const chunk = missing.slice(i, i + 50);
-    const res = await json(
-      await c.jira(route`/rest/api/3/issue/bulk`, {
-        method: 'POST',
-        headers: JSON_HEADERS,
-        body: JSON.stringify({
-          issueUpdates: chunk.map((x) => ({
-            fields: { project: { key: job.projectKey }, summary: x.summary, description: paragraphsToAdf(x.text), issuetype: { id: x.type.id }, labels: x.labels, ...(x.dueDate ? { duedate: x.dueDate } : {}) },
-          })),
-        }),
-      }),
-      'create demo items',
-    );
-    const failed = new Set((res.errors || []).map((e) => e.failedElementNumber));
-    const created = chunk.filter((_, j) => !failed.has(j));
-    (res.issues || []).forEach((r, j) => created[j] && known.set(created[j].summary, { id: String(r.id), key: r.key, fresh: true }));
-  }
+  // Epics and everything else first, then the tasks, which need their epic's key as parent.
+  await createItems(c, job.projectKey, missing.filter((x) => !x.parent), known);
+  await createItems(c, job.projectKey, missing.filter((x) => x.parent), known);
   // Follow-ups for the new items: status, comment and indexing.
   const follow = items
     .filter((x) => known.get(x.summary)?.fresh)
@@ -131,7 +171,7 @@ export async function demoLoad(job, { enqueue, enqueueMany }) {
 
   // The radar on the demo plans, once the history is indexed.
   const plans = Object.fromEntries(data.plans.map((p) => [p.key, known.get(p.summary)]).filter(([, v]) => v));
-  for (const p of Object.values(plans)) await enqueue({ type: 'prep', id: p.id, reason: 'demo', force: true, requestedAt: new Date().toISOString() }, 120);
+  for (const p of Object.values(plans)) await enqueue({ type: 'prep', id: p.id, reason: 'demo', force: true, requestedAt: new Date().toISOString() }, 300);
   return setDemoStatus(job.company, {
     state: 'done',
     step: 'Done',

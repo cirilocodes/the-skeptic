@@ -6,3 +6,4 @@ test/.ui/
 .env
 .forge/
 *.log
+INSTALL-LINK.txt

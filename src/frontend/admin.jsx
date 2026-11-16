@@ -184,14 +184,37 @@ function Health({ health, busy, onClear }) {
 const DEMO_INFO = {
   kestrel: {
     name: 'Kestrel Freight',
-    about: 'A logistics company. Epics, bugs as incidents, open risks, and Confluence retros and decision records. Its live chat was tried and abandoned in 2025.',
-    plans: { livechat: 'should get strong objections (it repeats the abandoned live chat)', honesty: 'should get no objections (nothing like it was tried)' },
+    key: 'KF',
+    about: 'A logistics company, 2021 to 2026: 127 work items (epics and their tasks, incidents as bugs, open risks) and 21 Confluence pages with retros and decision records.',
+    plans: { livechat: 'several items argue against it (the abandoned live chat, its incident, risk and decision)', voice: 'one item argues against it (the abandoned voice ordering)', honesty: 'nothing should object to it' },
     confluence: true,
   },
   pinecrest: {
     name: 'Pinecrest Apps',
-    about: 'A software company with no Confluence. Initiatives, an Incident type and open risks. It abandoned offline editing and a self-hosted edition.',
-    plans: { offline: 'should be held at the gate (offline editing failed before)', onprem: 'should be matched to the self-hosted edition, in different words', honest: 'should get no objections (nothing like it was tried)' },
+    key: 'PA',
+    about: 'A notes-app software company with no Confluence, 2021 to 2026: 105 work items with Initiatives, an Incident type and open risks.',
+    plans: { offline: 'several items argue against it (offline editing, its sync incident and an open risk)', onprem: 'one item argues against it, in different words (the self-hosted edition)', honest: 'nothing should object to it' },
+    confluence: false,
+  },
+  harbourvine: {
+    name: 'Harbour & Vine',
+    key: 'HV',
+    about: 'A group of six restaurants, 2021 to 2026: 106 work items with epics, bugs and risks, and 11 Confluence pages.',
+    plans: { tablets: 'several items argue against it (the tablet pilot, its outage, the Wi-Fi risk and a decision)', nightbowl: 'one item argues against it (the abandoned delivery-only brand)', allergens: 'nothing should object to it' },
+    confluence: true,
+  },
+  brightwell: {
+    name: 'Brightwell Learning',
+    key: 'BL',
+    about: 'An online learning platform for universities, 2021 to 2026: 105 work items with epics, bugs and risks, and 10 Confluence pages.',
+    plans: { proctoring: 'several items argue against it (the proctoring pilot, its false flags, a data risk and a decision)', reminders: 'one item argues against it (the 3 am reminder incident)', bookmarks: 'nothing should object to it' },
+    confluence: true,
+  },
+  sunfield: {
+    name: 'Sunfield Energy',
+    key: 'SE',
+    about: 'A pay-as-you-go solar company with no Confluence, 2021 to 2026: 106 work items with Initiatives, an Incident type and open risks.',
+    plans: { airtime: 'several items argue against it (the airtime pilot, its incident and the telco risk)', pumps: 'one item argues against it (the abandoned water pumps)', referral: 'nothing should object to it' },
     confluence: false,
   },
 };
@@ -206,8 +229,9 @@ function DemoData({ data, busy, run, setData, setMsg }) {
   return (
     <Stack space="space.200">
       <Text>
-        Try the Skeptic on a fictional company's history. Create an empty Jira project for it first (any template, for example a key of KF), and for Kestrel
-        Freight an empty Confluence space. Loading takes about two minutes and is safe to repeat.
+        Try the Skeptic on a fictional company's history. There are five, each with years of work and three demo plans to review. Create an empty Jira
+        project for it first (any template; the suggested key is shown), and for companies with Confluence an empty space. Loading takes about five minutes
+        and is safe to repeat.
       </Text>
       <Stack space="space.050">
         <Label labelFor="demoCompany">Demo company</Label>
@@ -220,8 +244,8 @@ function DemoData({ data, busy, run, setData, setMsg }) {
         <Text>{info.about}</Text>
       </Stack>
       <Inline space="space.200" shouldWrap alignBlock="end">
-        <Field id="demoProject" label="Jira project key" value={project} onChange={setProject} placeholder={company === 'kestrel' ? 'e.g. KF' : 'e.g. PA'} />
-        {info.confluence ? <Field id="demoSpace" label="Confluence space key" value={space} onChange={setSpace} placeholder="e.g. KF" /> : null}
+        <Field id="demoProject" label="Jira project key" value={project} onChange={setProject} placeholder={`e.g. ${info.key}`} />
+        {info.confluence ? <Field id="demoSpace" label="Confluence space key" value={space} onChange={setSpace} placeholder={`e.g. ${info.key}`} /> : null}
       </Inline>
       <ButtonGroup>
         <Button
@@ -576,7 +600,7 @@ function App() {
             )}
             <Text>
               Creates 40 labelled plans (once) in the project you name, reviews each in the background, and scores the reviews against the labels. Plans
-              that already have a full review keep it; the rest get a draft without AI. It needs the Kestrel Freight demo history (<Code>npm run seed</Code>).
+              that already have a full review keep it; the rest get a draft without AI. It needs the Kestrel Freight demo history: load it on the Demo data tab and enter its project key here.
             </Text>
             <Inline space="space.100" alignBlock="end" shouldWrap>
               <Field id="evalProject" label="Project for the evaluation plans" value={evalProject} onChange={setEvalProject} placeholder="e.g. KF" />

@@ -910,7 +910,7 @@ async function jsonOr(message, res) {
 }
 
 // Measure precision on this site: creates the 40 labelled plans (once), drafts a review of each in the
-// background, then scores them. Meant for the Kestrel Freight demo history (npm run seed).
+// background, then scores them. Meant for the Kestrel Freight demo history (Demo data tab, or npm run seed).
 resolver.define('startEvaluation', async ({ payload, context }) => {
   requireAdminModule(context);
   const projectKey = String(payload?.projectKey || '').trim().toUpperCase();
@@ -961,7 +961,7 @@ resolver.define('loadDemo', async ({ payload, context }) => {
   requireAdminModule(context);
   const company = String(payload?.company || '');
   const data = DEMOS[company];
-  if (!data) throw new Error('Choose Kestrel Freight or Pinecrest Apps.');
+  if (!data) throw new Error(`Choose one of the demo companies: ${Object.values(DEMOS).map((d) => d.company.name).join(', ')}.`);
   const projectKey = String(payload?.projectKey || '').trim().toUpperCase();
   if (!/^[A-Z][A-Z0-9_]+$/.test(projectKey)) throw new Error('Enter the key of the project to load the demo into, for example KF.');
   const c = client('user');
@@ -982,7 +982,7 @@ resolver.define('loadDemo', async ({ payload, context }) => {
   await enqueue({ type: 'demo-load', company, projectKey, spaceKey, accountId: context.accountId });
   return {
     status,
-    message: `Loading ${data.company.name} into ${projectKey}${spaceKey ? ` and the ${spaceKey} space` : ''}. It takes about two minutes; the demo plans are listed here when it is done.${note}`,
+    message: `Loading ${data.company.name} into ${projectKey}${spaceKey ? ` and the ${spaceKey} space` : ''}. It takes about five minutes; the demo plans are listed here when it is done.${note}`,
   };
 });
 resolver.define('getDemo', async ({ context }) => {

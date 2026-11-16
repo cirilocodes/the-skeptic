@@ -99,6 +99,10 @@ export function createSite(opts = {}) {
       const labels = ['kf-seed', 'skeptic-ignore', ...(e.outcome === 'shipped' ? ['shipped'] : e.outcome === 'abandoned' ? ['abandoned'] : [])];
       const i = site.addIssue({ summary: e.summary, text: e.text, labels, status });
       if (e.comment) i.fields.comment.comments.push({ author: { displayName: e.commentBy || 'someone' }, created: '2025-04-10T10:00:00.000+0000', body: adf(e.comment) });
+      for (const t of e.tasks || []) {
+        const child = site.addIssue({ summary: t, text: [`Part of "${e.summary}".`], type: 'Task', labels: ['kf-seed', 'skeptic-ignore'], status: status === 'new' ? 'new' : 'done' });
+        child.fields.parent = { key: i.key };
+      }
     }
     for (const x of incidents) site.addIssue({ summary: x.summary, text: x.text, type: incidentType, labels: ['kf-seed', 'skeptic-ignore'], status: 'done' });
     for (const r of risks) site.addIssue({ summary: r.summary, text: r.text, type: 'Task', labels: ['kf-seed', 'risk', 'skeptic-ignore'] });
@@ -264,6 +268,7 @@ export function createSite(opts = {}) {
       if (path === '/rest/api/3/issue/bulk' && method === 'POST') {
         const issues = (body.issueUpdates || []).map(({ fields: f }) => {
           const created = site.addIssue({ summary: f.summary, text: adfText(f.description).split('\n'), type: f.issuetype?.name || types.find((t) => t.id === f.issuetype?.id)?.name || 'Task', labels: f.labels || [], dueDate: f.duedate || null, projectKey: f.project?.key || project, reporter: who === 'app' ? 'app' : 'u1' });
+          if (f.parent?.key) created.fields.parent = { key: f.parent.key };
           return { id: created.id, key: created.key };
         });
         return ok({ issues, errors: [] }, 201);
@@ -293,7 +298,8 @@ export function createSite(opts = {}) {
       if (!withConfluence) return nf();
       if (path.startsWith('/wiki/api/v2/spaces')) {
         const keys = (path.match(/[?&]keys=([^&]+)/) || [])[1];
-        return ok({ results: !keys || keys.split(',').includes('KF') ? [{ id: '77', key: 'KF' }] : [] });
+        const spaces = (site.spaces || ['KF']).map((k, n) => ({ id: String(77 + n), key: k }));
+        return ok({ results: spaces.filter((sp) => !keys || keys.split(',').includes(sp.key)) });
       }
       if (path.startsWith('/wiki/rest/api/search')) {
         const cql = (path.match(/cql=(.*?)(&limit=|&excerpt=|$)/) || [])[1] || '';

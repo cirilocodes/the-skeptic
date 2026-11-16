@@ -1,12 +1,18 @@
-// A brand-new, empty site (what a judge has after installing the app): load both demo companies from the
-// settings page, then check the Skeptic finds their history and reviews their demo plans.
+// A brand-new, empty site (what a judge has after installing the app): load all five demo companies from
+// the settings page, then check the Skeptic finds their history and reviews every judge plan as expected:
+// several items against one plan, a single item against another, and nothing against the third.
 import { createSite } from './fakesite.mjs';
-import { company as kestrel } from '../seed/data.mjs';
-import { company as pinecrest, epics as pEpics } from '../seed/data-software.mjs';
-import { epics as kEpics, pages as kPages } from '../seed/data.mjs';
+import * as kestrel from '../src/lib/demo/kestrel.js';
+import * as pinecrest from '../src/lib/demo/pinecrest.js';
+import * as harbourvine from '../src/lib/demo/harbourvine.js';
+import * as brightwell from '../src/lib/demo/brightwell.js';
+import * as sunfield from '../src/lib/demo/sunfield.js';
+import { itemCount } from '../src/lib/demo/builders.js';
 
+const COMPANIES = [kestrel, pinecrest, harbourvine, brightwell, sunfield];
 const site = createSite({ history: false, plans: false, extraTypes: [{ id: '10009', name: 'Incident', hierarchyLevel: 0 }, { id: '10010', name: 'Initiative', hierarchyLevel: 1 }] });
-site.extraProjects = ['PA'];
+site.extraProjects = COMPANIES.map((d) => d.company.project).filter((k) => k !== 'KF');
+site.spaces = COMPANIES.filter((d) => d.company.confluence).map((d) => d.company.project);
 globalThis.__sim = { calls: [], respond: (...a) => site.respond(...a), noUser: false };
 globalThis.__retryBaseMs = 1;
 const app = await import('./.bundle.mjs');
@@ -23,7 +29,7 @@ const check = (name, cond, detail) => {
     console.log(`  ok   ${name}`);
   } else {
     failed += 1;
-    console.log(`  FAIL ${name}${detail !== undefined ? `\n       ${typeof detail === 'string' ? detail : JSON.stringify(detail).slice(0, 700)}` : ''}`);
+    console.log(`  FAIL ${name}${detail !== undefined ? `\n       ${typeof detail === 'string' ? detail : JSON.stringify(detail).slice(0, 900)}` : ''}`);
   }
 };
 const R = (fn, payload, context) => app.handler({ call: { functionKey: fn }, payload: payload || {}, context });
@@ -37,14 +43,17 @@ const fails = async (fn) => {
   }
 };
 const settle = async () => {
-  await Q.drain(5000);
+  await Q.drain(20000);
   await Q.drainDelayed();
-  await Q.drain(5000);
+  await Q.drain(20000);
 };
 const ctxFor = (key) => {
   const i = site.byKey.get(key);
   return { accountId: 'u1', extension: { issue: { id: i.id, key: i.key } } };
 };
+const inProject = (key) => [...site.issues.values()].filter((i) => i.fields.project.key === key);
+const sourcesOf = (review) => [...new Set(review.objections.map((o) => String(o.sourceTitle || '').replace(/^[A-Z][A-Z0-9_]+-\d+:\s*/, '')))];
+const named = (src, list) => (list || []).some((s) => src === s || src.includes(s) || s.includes(src));
 
 section('1. A new, empty site');
 {
@@ -55,55 +64,94 @@ section('1. A new, empty site');
   check('the setup checklist points to the demo data', /load a demo company/.test(a.checklist.find((i) => i.id === 'index').detail), a.checklist[0]);
 }
 
-section(`2. Load ${kestrel.name}`);
+section('2. The demo data itself');
+for (const d of COMPANIES) {
+  const titles = [...d.epics.map((e) => e.summary), ...d.epics.flatMap((e) => e.tasks || []), ...d.incidents.map((x) => x.summary), ...d.risks.map((x) => x.summary), ...d.plans.map((p) => p.summary)];
+  check(`${d.company.name}: over 100 work items, every title unique`, itemCount(d) > 100 && new Set(titles).size === titles.length, { items: itemCount(d), dupes: titles.length - new Set(titles).size });
+  const years = new Set(JSON.stringify(d.epics).match(/20(2[1-6])/g));
+  check(`${d.company.name}: history spans 2021 to 2026`, ['2021', '2022', '2023', '2024', '2025', '2026'].every((y) => years.has(y)), [...years]);
+  check(`${d.company.name}: three judge plans (several, one, none)`, d.plans.map((p) => p.expect).sort().join() === 'none,one,several', d.plans.map((p) => p.expect));
+  const known = new Set([...titles, ...d.pages.map((p) => p.title)]);
+  const unknown = d.plans.flatMap((p) => p.sources || []).filter((s) => !known.has(s));
+  check(`${d.company.name}: every expected source exists in its history`, unknown.length === 0, unknown);
+}
+
+section(`3. Load ${kestrel.company.name}`);
 {
   check('a project that does not exist is refused with what to do', /Create it first/.test((await fails(() => R('loadDemo', { company: 'kestrel', projectKey: 'NOPE' }, ADMIN))) || ''));
-  check('an unknown company is refused', /Choose Kestrel Freight or Pinecrest Apps/.test((await fails(() => R('loadDemo', { company: 'acme', projectKey: 'KF' }, ADMIN))) || ''));
+  check('an unknown company is refused, naming all five', /Kestrel Freight, Pinecrest Apps, Harbour & Vine, Brightwell Learning, Sunfield Energy/.test((await fails(() => R('loadDemo', { company: 'acme', projectKey: 'KF' }, ADMIN))) || ''));
   check('loading is admin-only', /admin page/.test((await fails(() => R('loadDemo', { company: 'kestrel', projectKey: 'KF' }, { accountId: 'u1', moduleKey: 'skeptic-panel' }))) || ''));
   const r = await R('loadDemo', { company: 'kestrel', projectKey: 'KF', spaceKey: 'KF' }, ADMIN);
-  check('loading starts in the background and says how long it takes', r.status.state === 'running' && /about two minutes/.test(r.message), r);
+  check('loading starts in the background and says how long it takes', r.status.state === 'running' && /about five minutes/.test(r.message), r);
   await settle();
   const st = (await R('getDemo', {}, ADMIN)).kestrel;
-  check('it finishes, with the demo plans listed', st.state === 'done' && st.plans.livechat && st.plans.honesty, st);
-  const kf = [...site.issues.values()].filter((i) => i.fields.project.key === 'KF');
-  check('every history item and plan is created', kf.length === kEpics.length + 3 + 2 + 2, kf.length);
+  check('it finishes, with the demo plans listed', st.state === 'done' && st.plans.livechat && st.plans.honesty && st.plans.voice, st);
+  const kf = inProject('KF');
+  check('every history item, task and plan is created', kf.length === itemCount(kestrel), { have: kf.length, want: itemCount(kestrel) });
   const chat = kf.find((i) => i.fields.summary === 'In-app live chat for customers');
   check('abandoned history is moved to Done', chat.fields.status.statusCategory.key === 'done' && chat.fields.labels.includes('abandoned'));
   check('its comment says why it stopped', JSON.stringify(site.comments.filter((c) => c.issue === chat.key)).includes('cannot staff evening chat'));
+  const vendor = kf.find((i) => i.fields.summary === 'Shortlist chat widget vendors');
+  check('tasks are created under their epic', vendor?.fields.parent?.key === chat.key && vendor.fields.issuetype.name === 'Task', vendor?.fields.parent);
+  check('tasks of finished epics are Done, and never marked abandoned', vendor.fields.status.statusCategory.key === 'done' && !vendor.fields.labels.includes('abandoned'));
   check('in-progress history is In Progress', kf.find((i) => i.fields.summary === 'Depot capacity forecasting').fields.status.statusCategory.key === 'indeterminate');
   check('incidents use the Bug type and are Done', kf.filter((i) => i.fields.issuetype.name === 'Bug').every((i) => i.fields.status.statusCategory.key === 'done'));
-  check('the Confluence retro and decision pages are created', kPages.every((p) => [...site.pages.values()].some((x) => x.title === p.title)));
-  check('the history is indexed', (KVS.get('idx:meta')?.docs || 0) >= kf.length + kPages.length - 2, KVS.get('idx:meta'));
+  check('the Confluence retro and decision pages are created', kestrel.pages.every((p) => [...site.pages.values()].some((x) => x.title === p.title)));
+  check('the history is indexed', (KVS.get('idx:meta')?.docs || 0) >= kf.length + kestrel.pages.length - 2, KVS.get('idx:meta'));
   const radar = KVS.get(`radar:${site.byKey.get(st.plans.livechat).id}`);
   check('the radar rates the live chat plan high, once the history is in', radar?.level === 'high', radar);
-  const v = await R('draftReview', {}, ctxFor(st.plans.livechat));
-  check('a review of the live chat plan cites the abandoned epic', v.review.objections.some((o) => /In-app live chat/.test(o.sourceTitle)), v.review.objections.map((o) => o.sourceTitle));
-  const h = await R('draftReview', {}, ctxFor(st.plans.honesty));
-  check('the honesty plan gets no objections', h.review.objections.length === 0);
   const again = await R('loadDemo', { company: 'kestrel', projectKey: 'KF', spaceKey: 'KF' }, ADMIN);
   await settle();
   const st2 = (await R('getDemo', {}, ADMIN)).kestrel;
-  check('loading again creates nothing twice', st2.created === 0 && st2.existing === kf.length && [...site.issues.values()].filter((i) => i.fields.project.key === 'KF').length === kf.length, [again.message, st2]);
+  check('loading again creates nothing twice', st2.created === 0 && st2.existing === kf.length && inProject('KF').length === kf.length, [again.message, st2]);
   const noSpace = await R('loadDemo', { company: 'kestrel', projectKey: 'KF', spaceKey: 'ZZ' }, ADMIN);
   check('a missing space is reported, not fatal', /no Confluence space ZZ/.test(noSpace.message));
   await settle();
 }
 
-section(`3. Load ${pinecrest.name} into a second project`);
-{
-  const r = await R('loadDemo', { company: 'pinecrest', projectKey: 'PA' }, ADMIN);
-  check('it needs no Confluence space', r.status.state === 'running' && !/space/.test(r.message.replace('Loading Pinecrest Apps into PA', '')), r.message);
+section('4. Load the other four companies, each into its own project');
+for (const d of COMPANIES.slice(1)) {
+  const id = d.company.id;
+  const key = d.company.project;
+  const r = await R('loadDemo', { company: id, projectKey: key, spaceKey: d.company.confluence ? key : '' }, ADMIN);
+  check(`${d.company.name}: loading starts${d.company.confluence ? ' with its space' : ', needing no Confluence space'}`, r.status.state === 'running' && (d.company.confluence ? r.message.includes(`the ${key} space`) : !/space/.test(r.message.replace(`Loading ${d.company.name} into ${key}`, ''))), r.message);
   await settle();
+  const st = (await R('getDemo', {}, ADMIN))[id];
+  check(`${d.company.name}: finishes with its three plans`, st.state === 'done' && d.plans.every((p) => st.plans[p.key]), st);
+  const items = inProject(key);
+  check(`${d.company.name}: all ${itemCount(d)} work items are created`, items.length === itemCount(d), items.length);
+  const planType = items.filter((i) => i.fields.labels.includes('plan')).map((i) => i.fields.issuetype.name);
+  check(`${d.company.name}: plans use the ${d.company.planType} type`, planType.length === 3 && planType.every((t) => t === d.company.planType), planType);
+  check(`${d.company.name}: incidents use the ${d.company.incidentType} type`, d.incidents.every((x) => items.find((i) => i.fields.summary === x.summary)?.fields.issuetype.name === d.company.incidentType));
+  const withParent = items.filter((i) => i.fields.parent?.key);
+  check(`${d.company.name}: every task sits under its epic`, withParent.length === d.epics.reduce((n, e) => n + (e.tasks || []).length, 0), withParent.length);
+  if (d.company.confluence) check(`${d.company.name}: its Confluence pages are created`, d.pages.every((p) => [...site.pages.values()].some((x) => x.title === p.title)));
+}
+check('all five companies are indexed together', (KVS.get('idx:meta')?.docs || 0) >= COMPANIES.reduce((n, d) => n + itemCount(d) + d.pages.length, 0) - 10, KVS.get('idx:meta'));
+
+section('5. Every judge plan, with all five companies on one site');
+const status = await R('getDemo', {}, ADMIN);
+for (const d of COMPANIES)
+  for (const p of d.plans) {
+    const key = status[d.company.id].plans[p.key];
+    const v = await R('draftReview', {}, ctxFor(key));
+    const srcs = sourcesOf(v.review);
+    const label = `${d.company.name}, "${p.summary}"`;
+    if (p.expect === 'several') {
+      check(`${label}: several history items argue against it`, srcs.length >= 2 && srcs.filter((s) => named(s, p.sources)).length >= 2, srcs);
+      check(`${label}: every item cited is one it should be`, srcs.every((s) => named(s, p.sources)), srcs);
+    } else if (p.expect === 'one') check(`${label}: exactly one item argues against it, the right one`, srcs.length === 1 && named(srcs[0], p.sources), srcs);
+    else check(`${label}: nothing objects to it`, v.review.objections.length === 0, srcs);
+    const cited = v.review.objections.filter((o) => String(o.docId || '').startsWith('i')).map((o) => String(o.sourceTitle || '').match(/^([A-Z][A-Z0-9_]+)-\d+:/)?.[1]).filter(Boolean);
+    check(`${label}: cites only its own company`, cited.every((k) => k === d.company.project), cited);
+    const radar = KVS.get(`radar:${site.byKey.get(key).id}`);
+    const want = p.expect === 'several' ? ['high'] : p.expect === 'one' ? ['medium', 'high'] : ['low'];
+    check(`${label}: the radar rates it ${want.join(' or ')}`, want.includes(radar?.level), radar && { level: radar.level, score: radar.score, reasons: radar.reasons });
+  }
+
+section(`6. ${pinecrest.company.name}: matching in different words`);
+{
   const st = (await R('getDemo', {}, ADMIN)).pinecrest;
-  check('it finishes with its three demo plans', st.state === 'done' && st.plans.offline && st.plans.onprem && st.plans.honest, st);
-  const pa = [...site.issues.values()].filter((i) => i.fields.project.key === 'PA');
-  check('plans use the Initiative type', pa.filter((i) => i.fields.labels.includes('plan')).every((i) => i.fields.issuetype.name === 'Initiative'));
-  check('incidents use the Incident type', pa.some((i) => i.fields.issuetype.name === 'Incident'));
-  check('every item is created', pa.length === pEpics.length + 2 + 1 + 3, pa.length);
-  const v = await R('draftReview', {}, ctxFor(st.plans.offline));
-  check('the offline plan is reviewed against Pinecrest history', v.review.objections.some((o) => /Offline editing/.test(o.sourceTitle)), v.review.objections.map((o) => o.sourceTitle));
-  const o = await R('draftReview', {}, ctxFor(st.plans.onprem));
-  check('the on-premise plan finds the self-hosted edition', o.review.objections.some((x) => /Self-hosted/.test(x.sourceTitle)), o.review.objections.map((x) => x.sourceTitle));
   const drift = await app.findEvidence({ planKey: st.plans.onprem, searchTerms: 'live chat, chat support, support staffing, evening cover' }, { accountId: 'u1' });
   const own = (drift.pastPlans || []).find((p) => /Self-hosted/.test(p.title));
   const candRefs = (drift.candidateObjections || []).map((c) => c.ref);
@@ -114,7 +162,7 @@ section(`3. Load ${pinecrest.name} into a second project`);
   check('a review comment on a demo plan never mentions the app account that created it', posted.length > 0 && posted.every((c) => !/"mention"/.test(c.text) && !/app-skeptic/.test(c.text)), posted.map((c) => c.text.slice(0, 120)));
 }
 
-section('4. Failures are shown, not hidden');
+section('7. Failures are shown, not hidden');
 {
   const types = globalThis.__sim.respond;
   globalThis.__sim.respond = (product, path, opts, who) => (String(path).includes('createmeta') ? { status: 500, body: { errorMessages: ['down'] } } : types(product, path, opts, who));
@@ -123,6 +171,24 @@ section('4. Failures are shown, not hidden');
   globalThis.__sim.respond = types;
   const st = (await R('getDemo', {}, ADMIN)).pinecrest;
   check('a failed load says so, with the reason', st.state === 'failed' && /issue types/.test(st.error), st);
+}
+
+section('8. A project that refuses parent links still gets every task');
+{
+  const fresh = createSite({ history: false, plans: false, extraTypes: [{ id: '10009', name: 'Incident', hierarchyLevel: 0 }, { id: '10010', name: 'Initiative', hierarchyLevel: 1 }] });
+  fresh.extraProjects = ['SE'];
+  globalThis.__sim.respond = (product, path, opts, who) => {
+    const body = typeof opts?.body === 'string' ? JSON.parse(opts.body) : opts?.body || {};
+    if (String(path) === '/rest/api/3/issue/bulk' && (body.issueUpdates || []).some((u) => u.fields.parent))
+      return { status: 400, body: { issues: [], errors: body.issueUpdates.map((_, j) => ({ failedElementNumber: j, elementErrors: { errors: { parent: 'Parent not allowed' } } })) } };
+    return fresh.respond(product, path, opts, who);
+  };
+  await R('loadDemo', { company: 'sunfield', projectKey: 'SE' }, ADMIN);
+  await settle();
+  globalThis.__sim.respond = (...a) => site.respond(...a);
+  const st = (await R('getDemo', {}, ADMIN)).sunfield;
+  const se = [...fresh.issues.values()].filter((i) => i.fields.project.key === 'SE');
+  check('the load finishes and creates every item, tasks without the link', st.state === 'done' && se.length === itemCount(sunfield), { state: st.state, error: st.error, have: se.length, want: itemCount(sunfield) });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
