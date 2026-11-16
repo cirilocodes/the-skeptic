@@ -1,0 +1,30 @@
+{
+  "name": "the-skeptic",
+  "version": "2.0.0",
+  "private": true,
+  "description": "The Skeptic: a Rovo agent and Forge app that argues against a plan using your organisation's own history, and gates it until the answers hold up. Codegeist 2026.",
+  "main": "src/index.js",
+  "license": "MIT",
+  "scripts": {
+    "seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON seed/seed.mjs",
+    "eval:seed": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON eval/seed-eval.mjs",
+    "eval:score": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON eval/score.mjs",
+    "build:test": "esbuild src/index.js --bundle --platform=node --format=esm --outfile=test/.bundle.mjs --log-level=warning --alias:@forge/api=./test/mocks/@forge/api/index.js --alias:@forge/kvs=./test/mocks/@forge/kvs/index.js --alias:@forge/resolver=./test/mocks/@forge/resolver/index.js --alias:@forge/events=./test/mocks/@forge/events/index.js && esbuild test/lib-entry.js --bundle --platform=node --format=esm --outfile=test/.pipeline.mjs --log-level=warning --alias:@forge/api=./test/mocks/@forge/api/index.js --alias:@forge/kvs=./test/mocks/@forge/kvs/index.js --alias:@forge/resolver=./test/mocks/@forge/resolver/index.js --alias:@forge/events=./test/mocks/@forge/events/index.js",
+    "test": "npm run build:test --silent && npm run build:ui --silent && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/sim.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/ui.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/stress.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/features.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/second-site.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON test/demo-load.mjs",
+    "check:ui": "esbuild src/frontend/index.jsx src/frontend/page.jsx src/frontend/context.jsx src/frontend/dashboard.jsx src/frontend/admin.jsx --bundle --outdir=test/.ui --log-level=warning --loader:.jsx=jsx --jsx=automatic --external:@forge/* --external:react",
+    "build:ui": "esbuild src/frontend/shared.jsx --alias:@forge/react=./test/mocks/@forge/react/index.js --alias:@forge/bridge=./test/mocks/@forge/bridge/index.js --external:react --external:react-test-renderer --loader:.jsx=jsx --log-level=warning --bundle --platform=node --format=esm \"--banner:js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outfile=test/.ui-panel.mjs && esbuild src/frontend/dashboard.jsx --alias:@forge/react=./test/mocks/@forge/react/index.js --alias:@forge/bridge=./test/mocks/@forge/bridge/index.js --external:react --external:react-test-renderer --loader:.jsx=jsx --log-level=warning --bundle --platform=node --format=esm \"--banner:js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outfile=test/.ui-dashboard.mjs && esbuild src/frontend/admin.jsx --alias:@forge/react=./test/mocks/@forge/react/index.js --alias:@forge/bridge=./test/mocks/@forge/bridge/index.js --external:react --external:react-test-renderer --loader:.jsx=jsx --log-level=warning --bundle --platform=node --format=esm \"--banner:js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outfile=test/.ui-admin.mjs && esbuild src/frontend/context.jsx --alias:@forge/react=./test/mocks/@forge/react/index.js --alias:@forge/bridge=./test/mocks/@forge/bridge/index.js --external:react --external:react-test-renderer --loader:.jsx=jsx --log-level=warning --bundle --platform=node --format=esm \"--banner:js=import { createRequire } from 'module'; const require = createRequire(import.meta.url);\" --outfile=test/.ui-context.mjs"
+  },
+  "dependencies": {
+    "@forge/api": "^8.5.0",
+    "@forge/bridge": "^7.3.0",
+    "@forge/events": "^3.0.10",
+    "@forge/kvs": "^2.1.2",
+    "@forge/react": "^12.5.0",
+    "@forge/resolver": "^2.0.2",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "react-test-renderer": "^18.3.1"
+  }
+}

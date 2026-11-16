@@ -1,0 +1,179 @@
+{
+  "cloud": true,
+  "rules": [
+    {
+      "id": 463079652492949,
+      "clientKey": "01a1c53a-f9b3-7a2a-a5ee-d85858c395a9",
+      "name": "The Skeptic: background reviews",
+      "state": "DISABLED",
+      "description": "",
+      "authorAccountId": null,
+      "actor": {
+        "type": "ACCOUNT_ID",
+        "value": "557058:f58131cb-b67d-43c7-b30d-6b58d40bd077"
+      },
+      "created": 1794827298309,
+      "updated": 1794830275463,
+      "trigger": {
+        "id": "3508e383-db54-40fb-9049-6f475936dfc9",
+        "parentId": null,
+        "conditionParentId": null,
+        "component": "TRIGGER",
+        "type": "jira.issue.field.changed",
+        "value": {
+          "eventFilters": [
+            "ari:cloud:jira::site/a5c38edf-32c7-4091-bbd3-731c31347d26"
+          ],
+          "changeType": "ANY_CHANGE",
+          "fields": [
+            {
+              "value": "labels",
+              "type": "field"
+            }
+          ],
+          "actions": []
+        },
+        "conditions": [],
+        "children": [],
+        "schemaVersion": 2,
+        "connectionId": null,
+        "checksum": null
+      },
+      "components": [
+        {
+          "id": "f876e219-e742-46be-8b76-c3290af5fa0d",
+          "parentId": null,
+          "conditionParentId": null,
+          "component": "CONDITION",
+          "type": "jira.jql.condition",
+          "value": "labels = skeptic-review",
+          "conditions": [],
+          "children": [],
+          "schemaVersion": 1,
+          "connectionId": null,
+          "checksum": null
+        },
+        {
+          "id": "aba52e9f-a26c-477a-92a5-9d0ed3642e3c",
+          "parentId": null,
+          "conditionParentId": null,
+          "component": "ACTION",
+          "type": "rovo.invoke-agent.action",
+          "value": {
+            "tagValue": "687d6b84-1267-4929-953e-de3b03192ffd",
+            "tagType": "EXTERNAL_AGENT_ID",
+            "activationId": "4efb8c85-6d9f-450d-ba5f-22889c9b7ea3",
+            "agentId": "687d6b84-1267-4929-953e-de3b03192ffd",
+            "agentNamedId": "687d6b84-1267-4929-953e-de3b03192ffd",
+            "agentInstruction": "You are running in automation, all lenses. Review {{issue.key}}. Call find-evidence for it, then do three independent passes (lens 1 standard, lens 2 reverse, lens 3 strict). Do not call save-review: the automation saves it. Reply with only {\"runs\": [pass1, pass2, pass3]}.",
+            "agentAAID": "712020:32c7609d-6600-4685-9f92-dc62e4f65665",
+            "agentDisplayName": "The Skeptic",
+            "invocationMode": "USER",
+            "allowAgentToExecuteActions": false,
+            "isVerified": false
+          },
+          "conditions": [],
+          "children": [],
+          "schemaVersion": 1,
+          "connectionId": "e1597498-0050-4ae6-ac83-ff9e7b7668e8",
+          "checksum": null
+        },
+        {
+          "id": "66c56953-faa3-4c30-8550-2ad3da9825fa",
+          "parentId": null,
+          "conditionParentId": null,
+          "component": "ACTION",
+          "type": "jira.issue.outgoing.webhook",
+          "value": {
+            "url": "https://PASTE-THE-WEB-REQUEST-URL-FROM-THE-SKEPTIC-SETTINGS-PAGE?issueKey={{issue.key}}&run=all",
+            "urlSecure": false,
+            "headers": [
+              {
+                "id": "_header_1794827227166",
+                "name": "Content-Type",
+                "value": "application/json",
+                "headerSecure": false
+              },
+              {
+                "id": "_header_1794827262200",
+                "name": "X-Skeptic-Secret",
+                "value": "",
+                "headerSecure": true
+              }
+            ],
+            "sendIssue": false,
+            "contentType": "custom",
+            "customBody": "{{agentResponse}}",
+            "method": "POST",
+            "responseEnabled": false,
+            "continueOnErrorEnabled": false
+          },
+          "conditions": [],
+          "children": [],
+          "schemaVersion": 1,
+          "connectionId": null,
+          "checksum": null
+        }
+      ],
+      "canOtherRuleTrigger": false,
+      "notifyOnError": "FIRSTERROR",
+      "projects": [],
+      "labels": [],
+      "tags": [
+        {
+          "id": 463129597752407,
+          "ruleIdUuid": "01a1e40b-2605-7821-9d74-2deac147cb4e",
+          "tagType": "IS_RULE_UPDATED",
+          "tagValue": "true"
+        },
+        {
+          "id": 463129597752406,
+          "ruleIdUuid": "01a1e40b-2605-7821-9d74-2deac147cb4e",
+          "tagType": "EXTERNAL_AGENT_ID",
+          "tagValue": "687d6b84-1267-4929-953e-de3b03192ffd"
+        }
+      ],
+      "ruleScope": {
+        "resources": [
+          "ari:cloud:jira::site/a5c38edf-32c7-4091-bbd3-731c31347d26"
+        ]
+      },
+      "ruleHome": {
+        "ruleLifecycleHome": {
+          "locationARI": "ari:cloud:jira-servicedesk::site/a5c38edf-32c7-4091-bbd3-731c31347d26"
+        },
+        "ruleBillingHome": {
+          "locationARI": "ari:cloud:jira-servicedesk::site/a5c38edf-32c7-4091-bbd3-731c31347d26"
+        }
+      },
+      "writeAccessType": "OWNER_ONLY",
+      "readAccessType": "UNRESTRICTED",
+      "collaborators": [],
+      "billingType": "NORMAL",
+      "idUuid": "01a1e40b-2605-7821-9d74-2deac147cb4e",
+      "partitionId": "01a1c53a-f9b3-7a2a-a5ee-d85858c395a9",
+      "checksum": {
+        "version": 3,
+        "value": "c0231198165bd86b9f5021e5846f929dcec4d80c387f485268d8da464a952ebb"
+      },
+      "currentVersionId": null,
+      "ruleArchetype": null,
+      "draftId": null,
+      "editRestrictions": null
+    }
+  ],
+  "connections": [
+    {
+      "id": "e1597498-0050-4ae6-ac83-ff9e7b7668e8",
+      "connectionTargetKey": "com.atlassian.rovo",
+      "targetConfigJson": "{\"product\":\"jira\",\"cloudId\":\"a5c38edf-32c7-4091-bbd3-731c31347d26\"}",
+      "authType": "ASAP",
+      "container": {
+        "id": "01a1e40b-2605-7821-9d74-2deac147cb4e",
+        "type": "RULE"
+      },
+      "createdAt": "2026-11-16T11:08:18.332543Z",
+      "updatedAt": "2026-11-16T11:08:18.332543Z"
+    }
+  ]
+}

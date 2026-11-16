@@ -1,0 +1,533 @@
+{
+ "Box": [
+  "backgroundColor",
+  "children",
+  "padding",
+  "paddingBlock",
+  "paddingBlockEnd",
+  "paddingBlockStart",
+  "paddingInline",
+  "paddingInlineEnd",
+  "paddingInlineStart",
+  "role",
+  "testId",
+  "xcss"
+ ],
+ "Button": [
+  "appearance",
+  "autoFocus",
+  "children",
+  "iconAfter",
+  "iconBefore",
+  "isDisabled",
+  "isSelected",
+  "onBlur",
+  "onClick",
+  "onFocus",
+  "shouldFitContainer",
+  "spacing",
+  "testId",
+  "type"
+ ],
+ "ButtonGroup": [
+  "appearance",
+  "children",
+  "label",
+  "testId",
+  "titleId"
+ ],
+ "Code": [
+  "children",
+  "testId"
+ ],
+ "CodeBlock": [
+  "highlight",
+  "highlightedEndText",
+  "highlightedStartText",
+  "language",
+  "shouldWrapLongLines",
+  "showLineNumbers",
+  "testId",
+  "text"
+ ],
+ "DatePicker": [
+  "appearance",
+  "autoFocus",
+  "dateFormat",
+  "defaultIsOpen",
+  "defaultValue",
+  "disabled",
+  "isDisabled",
+  "isInvalid",
+  "isOpen",
+  "locale",
+  "maxDate",
+  "minDate",
+  "nextMonthLabel",
+  "onChange",
+  "placeholder",
+  "previousMonthLabel",
+  "selectProps",
+  "shouldShowCalendarButton",
+  "spacing",
+  "testId",
+  "value",
+  "weekStartDay"
+ ],
+ "DonutChart": [
+  "width",
+  "height",
+  "data",
+  "colorAccessor",
+  "valueAccessor",
+  "labelAccessor",
+  "title",
+  "subtitle",
+  "showMarkLabels",
+  "showBorder",
+  "colorPalette",
+  "hideMenu",
+  "innerRadius",
+  "outerRadius"
+ ],
+ "DynamicTable": [
+  "caption",
+  "defaultPage",
+  "defaultSortKey",
+  "defaultSortOrder",
+  "emptyView",
+  "head",
+  "highlightedRowIndex",
+  "isFixedSize",
+  "isLoading",
+  "isRankable",
+  "label",
+  "loadingSpinnerSize",
+  "onRankEnd",
+  "onRankStart",
+  "onSetPage",
+  "page",
+  "paginationi18n",
+  "rows",
+  "rowsPerPage",
+  "sortKey",
+  "sortOrder",
+  "testId"
+ ],
+ "Em": [
+  "children"
+ ],
+ "Heading": [
+  "as",
+  "children",
+  "color",
+  "id",
+  "size",
+  "testId"
+ ],
+ "Inline": [
+  "alignBlock",
+  "alignInline",
+  "children",
+  "grow",
+  "rowSpace",
+  "separator",
+  "shouldWrap",
+  "space",
+  "spread",
+  "testId"
+ ],
+ "Label": [
+  "children",
+  "id",
+  "labelFor",
+  "testId"
+ ],
+ "Link": [
+  "href",
+  "openNewTab",
+  "appearance",
+  "children"
+ ],
+ "Lozenge": [
+  "appearance",
+  "children",
+  "isBold",
+  "maxWidth",
+  "testId"
+ ],
+ "Modal": [
+  "autoFocus",
+  "children",
+  "height",
+  "icon",
+  "label",
+  "onClose",
+  "shouldScrollInViewport",
+  "testId",
+  "title",
+  "width"
+ ],
+ "ModalBody": [
+  "children",
+  "hasInlinePadding",
+  "testId"
+ ],
+ "ModalFooter": [
+  "children",
+  "testId"
+ ],
+ "ModalHeader": [
+  "children",
+  "testId"
+ ],
+ "ModalTitle": [
+  "appearance",
+  "children",
+  "isMultiline",
+  "testId"
+ ],
+ "ModalTransition": [
+  "children"
+ ],
+ "ProgressTracker": [
+  "animated",
+  "items",
+  "label",
+  "spacing",
+  "testId"
+ ],
+ "RadioGroup": [
+  "defaultValue",
+  "isDisabled",
+  "isInvalid",
+  "isRequired",
+  "name",
+  "onChange",
+  "onInvalid",
+  "options",
+  "testId",
+  "value"
+ ],
+ "SectionMessage": [
+  "actions",
+  "appearance",
+  "children",
+  "testId",
+  "title"
+ ],
+ "Select": [
+  "appearance",
+  "autoFocus",
+  "closeMenuOnScroll",
+  "closeMenuOnSelect",
+  "defaultInputValue",
+  "defaultMenuIsOpen",
+  "defaultValue",
+  "id",
+  "inputId",
+  "inputValue",
+  "isClearable",
+  "isDisabled",
+  "isInvalid",
+  "isLoading",
+  "isMulti",
+  "isRequired",
+  "isSearchable",
+  "menuIsOpen",
+  "name",
+  "onBlur",
+  "onChange",
+  "onFocus",
+  "onInputChange",
+  "openMenuOnFocus",
+  "options",
+  "placeholder",
+  "spacing",
+  "testId",
+  "value"
+ ],
+ "Spinner": [
+  "appearance",
+  "delay",
+  "label",
+  "size",
+  "testId"
+ ],
+ "Stack": [
+  "alignBlock",
+  "alignInline",
+  "children",
+  "grow",
+  "space",
+  "spread",
+  "testId"
+ ],
+ "Strong": [
+  "children"
+ ],
+ "Tab": [
+  "children",
+  "testId"
+ ],
+ "TabList": [
+  "children"
+ ],
+ "TabPanel": [
+  "children",
+  "testId"
+ ],
+ "Tabs": [
+  "children",
+  "defaultSelected",
+  "id",
+  "onChange",
+  "selected",
+  "shouldUnmountTabPanelOnChange",
+  "testId"
+ ],
+ "Text": [
+  "align",
+  "as",
+  "color",
+  "maxLines",
+  "size",
+  "weight",
+  "children",
+  "testId"
+ ],
+ "TextArea": [
+  "appearance",
+  "autoFocus",
+  "defaultValue",
+  "id",
+  "isCompact",
+  "isDisabled",
+  "isInvalid",
+  "isMonospaced",
+  "isReadOnly",
+  "isRequired",
+  "maxHeight",
+  "maxLength",
+  "minLength",
+  "minimumRows",
+  "name",
+  "onBlur",
+  "onChange",
+  "onFocus",
+  "placeholder",
+  "resize",
+  "spellCheck",
+  "testId",
+  "value"
+ ],
+ "Textfield": [
+  "appearance",
+  "autoFocus",
+  "defaultValue",
+  "elemAfterInput",
+  "elemBeforeInput",
+  "id",
+  "isCompact",
+  "isDisabled",
+  "isInvalid",
+  "isMonospaced",
+  "isReadOnly",
+  "isRequired",
+  "max",
+  "maxLength",
+  "min",
+  "minLength",
+  "name",
+  "onBlur",
+  "onChange",
+  "onFocus",
+  "pattern",
+  "placeholder",
+  "testId",
+  "type",
+  "value",
+  "width"
+ ],
+ "Toggle": [
+  "defaultChecked",
+  "id",
+  "isChecked",
+  "isDisabled",
+  "label",
+  "name",
+  "onBlur",
+  "onChange",
+  "onFocus",
+  "size",
+  "testId",
+  "value"
+ ],
+ "User": [
+  "accountId",
+  "hideDisplayName"
+ ],
+ "UserPicker": [
+  "name",
+  "label",
+  "description",
+  "placeholder",
+  "isRequired",
+  "isMulti",
+  "defaultValue",
+  "includeUsers",
+  "includeGroups",
+  "onChange"
+ ],
+ "_values": {
+  "Lozenge.appearance": [
+   "default",
+   "inprogress",
+   "moved",
+   "new",
+   "removed",
+   "success"
+  ],
+  "SectionMessage.appearance": [
+   "information",
+   "warning",
+   "error",
+   "success",
+   "discovery"
+  ],
+  "Button.appearance": [
+   "default",
+   "danger",
+   "link",
+   "primary",
+   "subtle",
+   "subtle-link",
+   "warning",
+   "discovery"
+  ],
+  "Button.spacing": [
+   "default",
+   "compact",
+   "none"
+  ],
+  "Heading.size": [
+   "xxlarge",
+   "xlarge",
+   "large",
+   "medium",
+   "small",
+   "xsmall",
+   "xxsmall"
+  ],
+  "Spinner.size": [
+   "xsmall",
+   "small",
+   "medium",
+   "large",
+   "xlarge"
+  ],
+  "Inline.alignBlock": [
+   "start",
+   "center",
+   "end",
+   "baseline",
+   "stretch"
+  ],
+  "ProgressTracker.items.status": [
+   "unvisited",
+   "current",
+   "visited",
+   "disabled"
+  ],
+  "ProgressBar.appearance": [
+   "default",
+   "success",
+   "inverse"
+  ],
+  "Badge.appearance": [
+   "added",
+   "default",
+   "important",
+   "primary",
+   "primaryInverted",
+   "removed",
+   "warning",
+   "discovery",
+   "danger",
+   "neutral",
+   "success",
+   "information",
+   "inverse"
+  ]
+ },
+ "EmptyState": [
+  "buttonGroupLabel",
+  "description",
+  "header",
+  "headingLevel",
+  "isLoading",
+  "primaryAction",
+  "secondaryAction",
+  "tertiaryAction",
+  "testId",
+  "width"
+ ],
+ "ProgressBar": [
+  "appearance",
+  "ariaLabel",
+  "isIndeterminate",
+  "testId",
+  "value"
+ ],
+ "Tooltip": [
+  "children",
+  "content",
+  "delay",
+  "mousePosition",
+  "position",
+  "testId",
+  "truncate"
+ ],
+ "Badge": [
+  "appearance",
+  "children",
+  "max",
+  "testId"
+ ],
+ "LineChart": [
+  "width",
+  "height",
+  "data",
+  "xAccessor",
+  "yAccessor",
+  "colorAccessor",
+  "title",
+  "subtitle",
+  "plotMargin",
+  "plotMarginTop",
+  "plotMarginRight",
+  "plotMarginBottom",
+  "plotMarginLeft",
+  "showBorder",
+  "colorPalette",
+  "hideMenu"
+ ],
+ "BarChart": [
+  "width",
+  "height",
+  "data",
+  "xAccessor",
+  "yAccessor",
+  "colorAccessor",
+  "title",
+  "subtitle",
+  "plotMargin",
+  "plotMarginTop",
+  "plotMarginRight",
+  "plotMarginBottom",
+  "plotMarginLeft",
+  "showBorder",
+  "colorPalette",
+  "hideMenu"
+ ]
+}
