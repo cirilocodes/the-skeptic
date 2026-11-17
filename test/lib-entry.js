@@ -9,3 +9,4 @@ export { ledgerCsv } from '../src/lib/ledger';
 export { isIncidentType } from '../src/lib/profile';
 export { reviewAdf, shareable } from '../src/lib/notify';
 export { candidatesFrom } from '../src/lib/candidates';
+export { aboutThePlan as aboutThePlanForTest } from '../src/lib/relevance';

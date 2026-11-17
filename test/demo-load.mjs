@@ -13,6 +13,7 @@ const COMPANIES = [kestrel, pinecrest, harbourvine, brightwell, sunfield];
 const site = createSite({ history: false, plans: false, extraTypes: [{ id: '10009', name: 'Incident', hierarchyLevel: 0 }, { id: '10010', name: 'Initiative', hierarchyLevel: 1 }] });
 site.extraProjects = COMPANIES.map((d) => d.company.project).filter((k) => k !== 'KF');
 site.spaces = COMPANIES.filter((d) => d.company.confluence).map((d) => d.company.project);
+site.leadIsDefaultAssignee = true; // like a project whose default assignee is its lead
 globalThis.__sim = { calls: [], respond: (...a) => site.respond(...a), noUser: false };
 globalThis.__retryBaseMs = 1;
 const app = await import('./.bundle.mjs');
@@ -95,6 +96,7 @@ section(`3. Load ${kestrel.company.name}`);
   check('tasks are created under their epic', vendor?.fields.parent?.key === chat.key && vendor.fields.issuetype.name === 'Task', vendor?.fields.parent);
   check('tasks of finished epics are Done, and never marked abandoned', vendor.fields.status.statusCategory.key === 'done' && !vendor.fields.labels.includes('abandoned'));
   check('in-progress history is In Progress', kf.find((i) => i.fields.summary === 'Depot capacity forecasting').fields.status.statusCategory.key === 'indeterminate');
+  check('demo items are created unassigned, not piled on the project lead', kf.every((i) => !i.fields.assignee), kf.filter((i) => i.fields.assignee).length);
   check('incidents use the Bug type and are Done', kf.filter((i) => i.fields.issuetype.name === 'Bug').every((i) => i.fields.status.statusCategory.key === 'done'));
   check('the Confluence retro and decision pages are created', kestrel.pages.every((p) => [...site.pages.values()].some((x) => x.title === p.title)));
   check('the history is indexed', (KVS.get('idx:meta')?.docs || 0) >= kf.length + kestrel.pages.length - 2, KVS.get('idx:meta'));
@@ -110,6 +112,10 @@ section(`3. Load ${kestrel.company.name}`);
 }
 
 section('4. Load the other four companies, each into its own project');
+check(
+  'another company cannot be loaded into a project that holds Kestrel Freight',
+  /KF already holds Kestrel Freight's demo data\. Load Pinecrest Apps into its own empty project \(suggested key PA\)/.test((await fails(() => R('loadDemo', { company: 'pinecrest', projectKey: 'KF' }, ADMIN))) || ''),
+);
 for (const d of COMPANIES.slice(1)) {
   const id = d.company.id;
   const key = d.company.project;
@@ -131,6 +137,13 @@ check('all five companies are indexed together', (KVS.get('idx:meta')?.docs || 0
 
 section('5. Every judge plan, with all five companies on one site');
 const status = await R('getDemo', {}, ADMIN);
+// A decision record the Skeptic wrote for KF-28 earlier, as on a live site. It must never count as
+// evidence for another plan.
+const record = site.addPage({
+  title: `Decision: ${status.kestrel.plans.livechat} Add live chat to the mobile app (2026-11-14)`,
+  html: '<p>The team decided to go ahead after answering or accepting every objection the Skeptic raised from this organisation\'s history.</p><h2>Objections and answers</h2><ul><li>Support could not staff evening chat: the support team now covers evenings. Accepted by the support lead.</li><li>Chat transcripts hold personal data: the legal review is closed.</li></ul>',
+});
+await app.jobs({ body: { type: 'index-page', id: record.id } });
 for (const d of COMPANIES)
   for (const p of d.plans) {
     const key = status[d.company.id].plans[p.key];
@@ -138,7 +151,7 @@ for (const d of COMPANIES)
     const srcs = sourcesOf(v.review);
     const label = `${d.company.name}, "${p.summary}"`;
     if (p.expect === 'several') {
-      check(`${label}: several history items argue against it`, srcs.length >= 2 && srcs.filter((s) => named(s, p.sources)).length >= 2, srcs);
+      check(`${label}: several history items argue against it`, srcs.length >= 2 && srcs.filter((s) => named(s, p.sources)).length >= 2, { srcs, dropped: v.review.dropReasons });
       check(`${label}: every item cited is one it should be`, srcs.every((s) => named(s, p.sources)), srcs);
     } else if (p.expect === 'one') check(`${label}: exactly one item argues against it, the right one`, srcs.length === 1 && named(srcs[0], p.sources), srcs);
     else check(`${label}: nothing objects to it`, v.review.objections.length === 0, srcs);
@@ -148,6 +161,13 @@ for (const d of COMPANIES)
     const want = p.expect === 'several' ? ['high'] : p.expect === 'one' ? ['medium', 'high'] : ['low'];
     check(`${label}: the radar rates it ${want.join(' or ')}`, want.includes(radar?.level), radar && { level: radar.level, score: radar.score, reasons: radar.reasons });
   }
+
+{
+  const onprem = await app.findEvidence({ planKey: status.pinecrest.plans.onprem }, { accountId: 'u1' });
+  check('a decision record the Skeptic wrote for another plan is never offered as evidence', !(onprem.confluencePages || []).some((p) => /^Decision: KF-/.test(p.title)), (onprem.confluencePages || []).map((p) => p.title));
+  const own = await app.findEvidence({ planKey: status.kestrel.plans.livechat }, { accountId: 'u1' });
+  check('...nor for the plan it was written for, so the Skeptic never quotes itself', !(own.confluencePages || []).some((p) => /^Decision: KF-/.test(p.title)), (own.confluencePages || []).map((p) => p.title));
+}
 
 section(`6. ${pinecrest.company.name}: matching in different words`);
 {
@@ -189,6 +209,21 @@ section('8. A project that refuses parent links still gets every task');
   const st = (await R('getDemo', {}, ADMIN)).sunfield;
   const se = [...fresh.issues.values()].filter((i) => i.fields.project.key === 'SE');
   check('the load finishes and creates every item, tasks without the link', st.state === 'done' && se.length === itemCount(sunfield), { state: st.state, error: st.error, have: se.length, want: itemCount(sunfield) });
+}
+
+section('9. A site that does not allow unassigned work');
+{
+  const strict = createSite({ history: false, plans: false, extraTypes: [{ id: '10009', name: 'Incident', hierarchyLevel: 0 }, { id: '10010', name: 'Initiative', hierarchyLevel: 1 }] });
+  strict.extraProjects = ['SE'];
+  strict.noUnassigned = true;
+  strict.leadIsDefaultAssignee = true;
+  globalThis.__sim.respond = (...a) => strict.respond(...a);
+  await R('loadDemo', { company: 'sunfield', projectKey: 'SE' }, ADMIN);
+  await settle();
+  globalThis.__sim.respond = (...a) => site.respond(...a);
+  const st = (await R('getDemo', {}, ADMIN)).sunfield;
+  const se = [...strict.issues.values()].filter((i) => i.fields.project.key === 'SE');
+  check('the load falls back to the default assignee and still creates every item', st.state === 'done' && se.length === itemCount(sunfield), { state: st.state, error: st.error, have: se.length });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

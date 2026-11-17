@@ -79,7 +79,11 @@ export const plans = [
   {
     key: 'allergens',
     summary: 'Allergen icons on the printed menus',
-    text: ['Print small icons next to each dish for nuts, gluten, dairy and shellfish, matching the filter on the digital menu.', 'Proposed by: front of house. Target: Q1 2027.'],
+    text: [
+      'Print small icons next to each dish for nuts, gluten, dairy and shellfish, matching the filter on the digital menu.',
+      'The icons come from the same allergen list as the digital menu, and the head chef signs off each printed menu before it goes to the printer.',
+      'Proposed by: front of house. Target: Q1 2027.',
+    ],
     dueDate: '2027-02-28',
     expect: 'none',
   },

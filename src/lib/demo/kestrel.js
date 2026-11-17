@@ -100,6 +100,7 @@ export const plans = [
     summary: 'Voice booking for pickups through smart speakers',
     text: [
       'Let business customers book a pickup by asking their smart speaker, so the office does not need to open the portal.',
+      'No recordings, transcripts or personal data are kept beyond the pickup address and time, so transcript retention does not arise.',
       'Proposed by: customer products team. Target: Q3 2027.',
     ],
     dueDate: '2027-07-31',

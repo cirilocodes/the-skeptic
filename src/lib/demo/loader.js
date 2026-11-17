@@ -100,9 +100,25 @@ async function existingDemoItems(c, projectKey) {
   return out;
 }
 
+// Which demo company a project already holds, judged by the titles of its demo items (null when it holds
+// none). Used to stop one company being loaded into another company's project by mistake.
+const titlesOf = (d) => new Set([...d.epics.map((e) => e.summary), ...d.epics.flatMap((e) => e.tasks || []), ...d.incidents.map((x) => x.summary), ...d.risks.map((x) => x.summary), ...d.plans.map((x) => x.summary)]);
+export async function demoOwnerOf(c, projectKey) {
+  const have = [...(await existingDemoItems(c, projectKey)).keys()];
+  let best = null;
+  let most = 0;
+  for (const [id, d] of Object.entries(DEMOS)) {
+    const titles = titlesOf(d);
+    const n = have.filter((t) => titles.has(t)).length;
+    if (n > most) [best, most] = [id, n];
+  }
+  return best;
+}
+
 // Create work items in bulk, 50 at a time, recording each new key. A task whose parent link is refused
 // (some project types do not allow it) is created again without the link, so loading never stops on it.
 async function createItems(c, projectKey, list, known) {
+  let unassigned = true;
   const fieldsFor = (x, withParent) => ({
     project: { key: projectKey },
     summary: x.summary,
@@ -111,14 +127,30 @@ async function createItems(c, projectKey, list, known) {
     labels: x.labels,
     ...(x.dueDate ? { duedate: x.dueDate } : {}),
     ...(withParent && x.parent && known.get(x.parent)?.key ? { parent: { key: known.get(x.parent).key } } : {}),
+    // Unassigned, so a project whose default assignee is its lead does not pile 100 items on one person.
+    ...(unassigned ? { assignee: null } : {}),
   });
   const send = async (chunk, withParent) => {
     const raw = await c.jira(route`/rest/api/3/issue/bulk`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ issueUpdates: chunk.map((x) => ({ fields: fieldsFor(x, withParent) })) }) });
-    // When every item fails, Jira answers 400 with the per-item errors. Only a chunk of tasks (a parent
-    // problem) is worth retrying, so anything else still fails loudly.
-    const allTasks = withParent && chunk.every((x) => x.parent);
-    const res = raw?.status === 400 && allTasks ? await raw.json().catch(() => ({})) : await json(raw, 'create demo items');
-    if (raw?.status === 400 && allTasks && !(res.errors || []).length) res.errors = chunk.map((_, j) => ({ failedElementNumber: j }));
+    let res;
+    if (raw?.status === 400) {
+      // Every item failed; Jira lists why. A site that does not allow unassigned work gets the chunk again
+      // with its default assignee, and a chunk of tasks (a parent problem) is retried without the link by
+      // the caller. Anything else fails loudly.
+      const text = await raw.text().catch(() => '');
+      const body = (() => { try { return JSON.parse(text); } catch { return {}; } })();
+      if (unassigned && /assignee/i.test(text)) {
+        unassigned = false;
+        return send(chunk, withParent);
+      }
+      if (!(withParent && chunk.every((x) => x.parent))) {
+        const err = new Error('create demo items failed (400)');
+        err.status = 400;
+        err.detail = text.slice(0, 500);
+        throw err;
+      }
+      res = (body.errors || []).length ? body : { errors: chunk.map((_, j) => ({ failedElementNumber: j })) };
+    } else res = await json(raw, 'create demo items');
     const failed = new Set((res.errors || []).map((e) => e.failedElementNumber));
     const created = chunk.filter((_, j) => !failed.has(j));
     (res.issues || []).forEach((r, j) => created[j] && known.set(created[j].summary, { id: String(r.id), key: r.key, fresh: true }));

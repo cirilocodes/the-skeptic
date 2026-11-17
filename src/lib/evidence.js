@@ -286,8 +286,11 @@ export async function gatherEvidence({ reader, plan, searchTerms, siteUrl, setti
     .filter((x) => cat(x) === 'risk' && x.doc.statusCat !== 'done')
     .map(describeIssue)
     .slice(0, 4);
+  // A decision record the Skeptic wrote ("Decision: KF-28 … (2026-11-14)") only restates how one of its
+  // own reviews ended. Citing it would be the Skeptic quoting itself, for that plan or any other.
+  const skepticRecord = (x) => /^Decision: [A-Z][A-Z0-9_]+-\d+ .*\(\d{4}-\d{2}-\d{2}\)$/.test(String(x.raw?.title || x.doc?.title || ''));
   const pagesList = ranked
-    .filter((x) => x.doc.kind === 'page')
+    .filter((x) => x.doc.kind === 'page' && !skepticRecord(x))
     .sort(byScore)
     .map(describePage)
     .sort((a, b) => b.decisionOrRetro - a.decisionOrRetro || b.relevance - a.relevance)

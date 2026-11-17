@@ -79,7 +79,7 @@ export const plans = [
   {
     key: 'referral',
     summary: 'Referral bonus for customers who bring a neighbour',
-    text: ['When a customer refers a neighbour who signs up and pays the deposit, give the customer one free week of power.', 'Proposed by: sales team. Target: Q1 2027.'],
+    text: ['When a customer refers a neighbour who signs up, give the customer one free week of power after the neighbour’s third monthly payment, the same rule as the agent referral bonus.', 'Proposed by: sales team. Target: Q1 2027.'],
     dueDate: '2027-02-28',
     expect: 'none',
   },

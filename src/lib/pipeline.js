@@ -73,6 +73,54 @@ function nameInEvidence(name, ref) {
   return parts.length && parts.every((p) => hay.includes(p)) ? clip(name, 80) : '';
 }
 
+// The agent's internal reference ids ("(E2)", "(P1, C3)") mean nothing to a reader; Jira keys stay.
+const noRefIds = (t) => (typeof t === 'string' ? t.replace(/\s*\((?:[A-Z]\d{1,2})(?:\s*,\s*[A-Z]\d{1,2})*\)/g, '').replace(/\s+([.,;:])/g, '$1') : t);
+// A point that argues for the plan ("confirming technical feasibility") is support, not an objection.
+const SUPPORT_CLAIM = /\b(?:confirm(?:s|ing)?|proves?|proving|shows?|showing|demonstrat(?:es|ing))\b[^.;]{0,30}\b(?:feasib\w*|it (?:can|will) work|this (?:can|will) work)\b|\bsuccessful precedent\b|\bsupports? (?:the|this) plan\b/i;
+// A code check that a point is already answered by the plan, for when the agent did not quote the plan.
+// Two narrow cases, each needing the plan's own words:
+//  1. the point says "the plan does not specify X" and one plan sentence holds most of X's words;
+//  2. a plan sentence opens by ruling the topic out ("No recordings or transcripts are kept") and shares at least
+//     three words with the point, one of them in the cited item's title.
+const ABSENCE = /\b(?:the )?plan (?:does not|doesn't|never|fails to|lacks?|has no|gives no|makes no|omits?)\b(?:\s+(?:specify|specifies|mention|mentions|include|includes|say|says|address|addresses|describe|describes|name|names|state|states|explain|explains|define|defines|cover|covers|provide|provides|have|give|set out|plan for|account for))?(.*)$/i;
+const NEGATES = /^(?:no|nothing|none|never)\b/i;
+const planSentences = (planText) => String(planText || '').split(/(?<=[.!?:])\s+|\n+/).map((x) => x.trim()).filter((x) => x.length > 20);
+export function answeredByPlan(claim, sourceTitle, planText) {
+  const sentences = planSentences(planText);
+  const absent = String(claim || '').match(ABSENCE);
+  if (absent) {
+    const want = [...tokenSet(absent[1])];
+    if (want.length >= 2)
+      for (const s of sentences) {
+        const have = tokenSet(s);
+        if (want.filter((w) => have.has(w)).length / want.length >= 0.6) return s;
+      }
+  }
+  const claimWords = tokenSet(claim);
+  const titleWords = tokenSet(String(sourceTitle || '').replace(/^[A-Z][A-Z0-9_]+-\d+:\s*/, ''));
+  for (const s of sentences) {
+    if (!NEGATES.test(s)) continue;
+    const words = tokenSet(s);
+    const shared = [...words].filter((w) => claimWords.has(w));
+    if (shared.length >= 3 && shared.some((w) => titleWords.has(w))) return s;
+    // The sentence rules out the cited item's own topic ("No … transcripts are kept … transcript
+    // retention does not arise" against "Chat transcript retention: legal review").
+    if ([...words].filter((w) => titleWords.has(w)).length >= 2) return s;
+  }
+  return '';
+}
+
+// An objection points at something that went wrong or a constraint the plan must meet. A claim with no
+// trace of either ("was designed for agents, not customers") is a difference, not a problem.
+const PROBLEM = /\b(?:abandon\w*|fail\w*|stopp\w*|stop|cancel\w*|incident\w*|outage\w*|lost|los[st]e?s?|delay\w*|late|complain\w*|complaint\w*|could(?: not|n't)|cannot|can't|unable|refus\w*|block\w*|risk\w*|breach\w*|leak\w*|fraud\w*|default\w*|behind|overwr\w*|requir\w*|must|need\w*|only if|limit\w*|cost\w*|expens\w*|budget|penalt\w*|legal|unsafe|broke\w*|down|wait\w*|queue\w*|shortfall\w*|stolen|theft|spam\w*|flag\w*|error\w*|bug\w*|problem\w*|issue\w*|conflict\w*|crash\w*|unresolved|open|never|forbid\w*|prohibit\w*|decid\w*|decision|rejected|declin\w*|low|fell|drop\w*|harm\w*|damag\w*|injur\w*|unsafe|exceed\w*|overrun\w*|short|lack\w*|missing|without|gap\w*|unaddressed|unclear|disput\w*|dissatisf\w*|churn\w*|unpaid|owed|debt|liabilit\w*|audit\w*|complian\w*|regulat\w*|permit\w*|licen[cs]\w*|approv\w*|sign[- ]off|staff\w*|capacity|shift|overload\w*|depend\w*|single|only one|one supplier)\b/i;
+const NO_PROBLEM = (claim) => !PROBLEM.test(String(claim || ''));
+// "May not account for…" with nothing that actually happened behind it is a guess, not history.
+const HEDGE = /\b(?:may|might)\b|\bcould (?:potentially|possibly|be|lead|cause|result|create|introduce)\b/i;
+const HAPPENED = /\b(?:abandon\w*|fail(?:ed|ure|ures)|stopped|cancel(?:led|ed)|incidents?|outages?|lost|complain(?:ed|ts?)|delayed|breach(?:ed|es)?|leak(?:ed|s)?|went down|was down|overwr(?:ote|itten)|refused|rejected|decided|decision|flagged|stolen|charged|locked|could not|couldn't|cannot|never|unresolved|still open|remains? open|fell|dropped|waited|shortfalls?|defaulted|fell behind|did not|didn't|was not|wasn't)\b/i;
+const SPECULATION = (claim) => HEDGE.test(String(claim || '')) && !HAPPENED.test(String(claim || ''));
+const OWNER_CLAIM = /\b(?:no|without|lacks?|lacking|missing|has not|hasn't|does not (?:name|list|have)|doesn't (?:name|list|have)|not (?:named|assigned))\b[^.;]{0,40}\b(?:owner|lead|accountable|assignee|designated)\b|\b(?:owner|lead)\b[^.;]{0,25}\b(?:is (?:not|un)\w*|unclear|undefined|missing|not (?:named|set|defined|assigned))\b/i;
+const WORKLOAD_CLAIM = /\b(?:\d+ open (?:work )?items|over capacity|overloaded|too many (?:open )?(?:items|tasks|work items))\b/i;
+
 export function normaliseRun(run, { refs, target }) {
   const planText = `${target.title}\n${target.text || ''}`;
   // The plan in its own words plus listed synonyms ("on premise" ≈ "self-hosted"), for the check that an
@@ -101,7 +149,7 @@ export function normaliseRun(run, { refs, target }) {
       dropped.noRef += 1;
       continue;
     }
-    const claim = clip(String(o?.claim || ''), 400);
+    const claim = noRefIds(clip(String(o?.claim || ''), 400));
     if (claim.length < 15) {
       dropped.noClaim += 1;
       continue;
@@ -136,10 +184,32 @@ export function normaliseRun(run, { refs, target }) {
       reasons.push(`${ref}: from another project and not about what this plan says`);
       continue;
     }
+    // Who owns the plan and how busy people are come from the exact rule checks (real assignees, real
+    // counts). An argument about them drawn from history only repeats those checks less reliably.
+    if (SUPPORT_CLAIM.test(claim)) {
+      dropped.citation += 1;
+      reasons.push(`${ref}: argues for the plan, not against it`);
+      continue;
+    }
+    if (OWNER_CLAIM.test(claim) || WORKLOAD_CLAIM.test(claim)) {
+      dropped.citation += 1;
+      reasons.push(`${ref}: owners and workload are checked by the rules, not argued from history`);
+      continue;
+    }
     const check = citationCheck(claim, `${src.title}\n${src.text}`, planText);
     if (!check.ok) {
       dropped.citation += 1;
       reasons.push(`${ref}: ${check.reason}`);
+      continue;
+    }
+    if (NO_PROBLEM(claim)) {
+      dropped.citation += 1;
+      reasons.push(`${ref}: names no problem or constraint from the history`);
+      continue;
+    }
+    if (SPECULATION(claim)) {
+      dropped.citation += 1;
+      reasons.push(`${ref}: a guess about what may happen, not something the history shows`);
       continue;
     }
     const item = {
@@ -157,6 +227,12 @@ export function normaliseRun(run, { refs, target }) {
     const quote = clip(String(o?.planAlreadyHandles || ''), 300);
     if (quote && quoteFound(quote, planText) && overlap(quote, `${claim} ${src.title} ${assumption.text}`).count >= 1) {
       handled.push({ ...item, quote });
+      continue;
+    }
+    const answer = answeredByPlan(claim, src.title, planText);
+    if (answer) {
+      handled.push({ ...item, quote: clip(answer, 300) });
+      reasons.push(`${ref}: the plan already answers it ("${clip(answer, 80)}")`);
       continue;
     }
     if (quote) reasons.push(`${ref}: the "already handled" quote is not in the plan, so the objection stands`);
@@ -331,7 +407,7 @@ export function finalize({ runs, evidence, target, previous, rules, learning, ca
     const unchanged = p.sectionHash && currentHashes.has(p.sectionHash);
     // A kept objection must still pass today's checks: one an earlier review let through from an
     // unrelated project is not carried forward.
-    const stillFits = p.rule || aboutThePlan({ title: p.sourceTitle || '', text: (refs[p.ref]?.docId === p.docId ? refs[p.ref]?.text : '') || p.sourceQuote || '' }, target);
+    const stillFits = p.rule || (!SUPPORT_CLAIM.test(p.claim || '') && !NO_PROBLEM(p.claim || '') && !SPECULATION(p.claim || '') && !answeredByPlan(p.claim, p.sourceTitle, `${target.title}\n${target.text || ''}`) && aboutThePlan({ title: p.sourceTitle || '', text: (refs[p.ref]?.docId === p.docId ? refs[p.ref]?.text : '') || p.sourceQuote || '' }, target) && !OWNER_CLAIM.test(p.claim || '') && !WORKLOAD_CLAIM.test(p.claim || ''));
     if (unchanged && !p.rule && stillFits) merged.push({ ...p, carriedOver: true });
     else if (p.status !== 'resolved') droppedByChange += 1;
   }
@@ -352,7 +428,7 @@ export function finalize({ runs, evidence, target, previous, rules, learning, ca
     .filter(Boolean)
     .filter((m) => !objections.some((o) => o.ref === m.ref))
     .slice(0, 3)
-    .map((m) => ({ ref: m.ref, docId: refs[m.ref]?.docId || null, text: m.claim, sourceTitle: clip(refs[m.ref]?.title || '', 160), sourceUrl: refs[m.ref]?.url }));
+    .map((m) => ({ ref: m.ref, docId: refs[m.ref]?.docId || null, text: noRefIds(m.claim), sourceTitle: clip(refs[m.ref]?.title || '', 160), sourceUrl: refs[m.ref]?.url }));
 
   const dropped = normalised.reduce(
     (acc, r) => {
@@ -369,9 +445,9 @@ export function finalize({ runs, evidence, target, previous, rules, learning, ca
     handled: handled.map((h) => ({ ref: h.ref, docId: h.docId || null, claim: h.claim, quote: h.quote, sourceTitle: clip(refs[h.ref]?.title || '', 160), sourceUrl: refs[h.ref]?.url })),
     worthAsking,
     assumptions,
-    questions: first.questions,
-    revisitWhen,
-    summary: first.summary,
+    questions: (first.questions || []).map(noRefIds),
+    revisitWhen: (revisitWhen || []).map(noRefIds),
+    summary: noRefIds(first.summary),
     dropped,
     dropReasons: [...new Set(normalised.flatMap((r) => r.reasons))].slice(0, 8),
     droppedByChange,

@@ -19,7 +19,7 @@ import { appClient, client, json, JSON_HEADERS, userClientOrNull } from './lib/h
 import { summariseReviews } from './lib/insights';
 import { enqueue, enqueueMany, ensureIndexStarted, EVAL_LABEL, FINALIZE_AFTER_S, runJob, startBackfill } from './lib/jobs';
 import { evalPlans, FREEZE } from './lib/evalset';
-import { DEMOS, getDemoStatus, setDemoStatus } from './lib/demo/loader';
+import { DEMOS, demoOwnerOf, getDemoStatus, setDemoStatus } from './lib/demo/loader';
 import { computeCalibration, recordSignal } from './lib/learning';
 import { decideMatch, ledgerCsv, listLedger, listMatches } from './lib/ledger';
 import { comment, notifyApprover } from './lib/notify';
@@ -966,6 +966,9 @@ resolver.define('loadDemo', async ({ payload, context }) => {
   if (!/^[A-Z][A-Z0-9_]+$/.test(projectKey)) throw new Error('Enter the key of the project to load the demo into, for example KF.');
   const c = client('user');
   if (!(await c.jira(route`/rest/api/3/project/${projectKey}`)).ok) throw new Error(`There is no project ${projectKey} that you can see. Create it first (any template), then try again.`);
+  const owner = await demoOwnerOf(c, projectKey);
+  if (owner && owner !== company)
+    throw new Error(`${projectKey} already holds ${DEMOS[owner].company.name}'s demo data. Load ${data.company.name} into its own empty project (suggested key ${data.company.project}).`);
   let spaceKey = String(payload?.spaceKey || '').trim().toUpperCase();
   let note = '';
   if (data.company.confluence) {

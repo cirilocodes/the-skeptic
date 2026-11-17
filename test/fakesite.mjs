@@ -266,8 +266,13 @@ export function createSite(opts = {}) {
         return ok({ issues, issueErrors });
       }
       if (path === '/rest/api/3/issue/bulk' && method === 'POST') {
+        // Like Jira: no assignee given means the project's default (its lead, u1); an explicit null means
+        // unassigned, which a site may forbid.
+        site.bulkBodies = [...(site.bulkBodies || []), body];
+        if (site.noUnassigned && (body.issueUpdates || []).some((u) => 'assignee' in u.fields && u.fields.assignee === null))
+          return { status: 400, body: { issues: [], errors: body.issueUpdates.map((_, j) => ({ failedElementNumber: j, elementErrors: { errors: { assignee: 'Work items must be assigned.' } } })) } };
         const issues = (body.issueUpdates || []).map(({ fields: f }) => {
-          const created = site.addIssue({ summary: f.summary, text: adfText(f.description).split('\n'), type: f.issuetype?.name || types.find((t) => t.id === f.issuetype?.id)?.name || 'Task', labels: f.labels || [], dueDate: f.duedate || null, projectKey: f.project?.key || project, reporter: who === 'app' ? 'app' : 'u1' });
+          const created = site.addIssue({ summary: f.summary, text: adfText(f.description).split('\n'), type: f.issuetype?.name || types.find((t) => t.id === f.issuetype?.id)?.name || 'Task', labels: f.labels || [], dueDate: f.duedate || null, projectKey: f.project?.key || project, reporter: who === 'app' ? 'app' : 'u1', assignee: 'assignee' in f ? f.assignee?.accountId || null : site.leadIsDefaultAssignee ? 'u1' : null });
           if (f.parent?.key) created.fields.parent = { key: f.parent.key };
           return { id: created.id, key: created.key };
         });

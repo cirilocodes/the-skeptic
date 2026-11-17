@@ -518,6 +518,110 @@ section('19. Items from another project must be about the plan');
   check('an open objection from the plan\'s own project is still carried over on an unchanged section', g.objections.some((o) => o.id === 'old2' && o.carriedOver), g.objections.map((o) => o.id));
 }
 
+section('19b. Owners and workload are left to the rules');
+{
+  const lib = await import('./.pipeline.mjs');
+  const target = { type: 'issue', key: 'HV-37', title: 'Allergen icons on the printed menus', text: 'Print small icons next to each dish for nuts, gluten, dairy and shellfish, matching the filter on the digital menu. Proposed by: front of house.', sections: [{ n: 1, text: 'Print small icons next to each dish for nuts, gluten, dairy and shellfish, matching the filter on the digital menu. Proposed by: front of house.' }] };
+  const refs = {
+    P1: { title: 'HV-11: Menu engineering review', text: 'Rework every menu around the dishes that sell and make money. Owner: Joseph Tetteh. Shipped June 2023. New menu layouts.' },
+    P2: { title: 'HV-12: Digital menu with allergen filter', text: 'A QR-code menu where guests filter dishes by allergen: nuts, gluten, dairy, shellfish. Owner: Akosua Mensah. Shipped January 2024. Kitchen sign-off of allergen data.' },
+  };
+  const run = {
+    assumptions: [{ id: 'A1', text: 'Print small icons next to each dish matching the filter on the digital menu', section: 1 }],
+    objections: [
+      { assumption: 'A1', ref: 'P1', claim: "Previous menu engineering was owned by Joseph Tetteh, but this plan lists only 'front of house' as the proposer without a designated lead.", strength: 'related', impact: 3, likelihood: 3 },
+      { assumption: 'A1', ref: 'P2', claim: 'Akosua Mensah already has 31 open work items, so the digital menu filter work competes for the same time.', strength: 'related', impact: 3, likelihood: 3 },
+      { assumption: 'A1', ref: 'P2', claim: 'The digital menu allergen filter needed a kitchen sign-off of allergen data before launch, and the printed icons need the same sign-off.', strength: 'related', impact: 3, likelihood: 3 },
+    ],
+  };
+  const n = lib.normaliseRun(run, { refs, target });
+  check('a point that only says the plan has no named lead is dropped', !n.objections.some((o) => /designated lead/.test(o.claim)) && n.reasons.some((r) => /owners and workload are checked by the rules/.test(r)), n.reasons);
+  check('a point about someone\'s open work items is dropped', !n.objections.some((o) => /open work items/.test(o.claim)));
+  check('a real point from the same history is kept', n.objections.some((o) => /sign-off/.test(o.claim)), n.objections.map((o) => o.claim));
+  const t2 = { ...target, sections: [{ n: 1, text: target.text, hash: 'h1' }] };
+  const previous = { state: 'active', objections: [{ id: 'own1', ref: 'P1', docId: 'hv11', sourceTitle: refs.P1.title, sourceQuote: refs.P1.text, claim: run.objections[0].claim, sectionHash: 'h1', status: 'open', severity: 'medium', score: 5 }] };
+  const f = lib.finalize({ runs: [{ assumptions: run.assumptions, objections: [] }], evidence: { refs }, target: t2, previous, rules: { findings: [], checks: [] } });
+  check('an earlier "no named lead" point is not carried into the next review', !f.objections.some((o) => o.id === 'own1'), f.objections.map((o) => o.id));
+}
+
+section('19c. Support is not an objection; internal ids never reach the reader');
+{
+  const lib = await import('./.pipeline.mjs');
+  const target = { type: 'issue', key: 'SE-36', title: 'Referral bonus for customers who bring a neighbour', text: 'When a customer refers a neighbour who signs up and pays the deposit, give the customer one free week of power.', sections: [{ n: 1, text: 'When a customer refers a neighbour who signs up and pays the deposit, give the customer one free week of power.', hash: 'h1' }] };
+  const refs = { P1: { title: 'SE-6: Agent referral bonus', text: 'Agents earn a bonus for each customer who completes three payments. Owner: Adwoa Sarpong. Shipped July 2022. Bonus rules. Bonus fraud checks.' } };
+  const run = {
+    summary: 'The referral plan fits what was done before (P1).',
+    assumptions: [{ id: 'A1', text: 'give the customer one free week of power when a neighbour signs up', section: 1 }],
+    objections: [{ assumption: 'A1', ref: 'P1', claim: 'Sunfield Energy has already implemented referral bonus logic in SE-6 (shipped July 2022), confirming technical feasibility for this type of incentive.', strength: 'related', impact: 2, likelihood: 2 }],
+    revisitWhen: ['If the bonus fraud checks (P1) show referral fraud.'],
+  };
+  const n = lib.normaliseRun(run, { refs, target });
+  check('a precedent that supports the plan is not raised as an objection', n.objections.length === 0 && n.reasons.some((r) => /argues for the plan/.test(r)), n.reasons);
+  const f = lib.finalize({ runs: [run], evidence: { refs }, target, previous: null, rules: { findings: [], checks: [] } });
+  check('reference ids like "(P1)" are removed from what people read', !/\(P1\)/.test(`${f.summary} ${(f.revisitWhen || []).join(' ')}`), [f.summary, f.revisitWhen]);
+}
+
+section('19d. A point the plan already answers moves to "already covered", even when the agent missed it');
+{
+  const lib = await import('./.pipeline.mjs');
+  const hv = 'Print small icons next to each dish for nuts, gluten, dairy and shellfish, matching the filter on the digital menu. The icons come from the same allergen list as the digital menu, and the head chef signs off each printed menu before it goes to the printer.';
+  check(
+    '"the plan does not specify a sign-off" is answered by the plan sentence that does',
+    /head chef signs off each printed menu/.test(lib.answeredByPlan('The kitchen guide requires the head chef to sign off on allergen lists before they go on the menu, but the plan does not specify a sign-off for the printed version.', 'Allergen information: kitchen guide', hv)),
+  );
+  const kf = 'Let business customers book a pickup by asking their smart speaker, so the office does not need to open the portal. No recordings, transcripts or personal data are kept beyond the pickup address and time, so transcript retention does not arise.';
+  check(
+    'an open legal review on transcript retention is answered by "no transcripts are kept"',
+    /No recordings, transcripts or personal data are kept/.test(lib.answeredByPlan('A critical legal review (KF-26) regarding the retention of transcripts and personal data from real-time channels was raised in March 2025 and remains unaddressed.', 'KF-26: Chat transcript retention: legal review', kf)),
+  );
+  const chat = 'Add a chat button to the mobile app so customers can talk to support from 8 am to 10 pm. No extra hiring is planned.';
+  check(
+    'a real objection is not swallowed: "no extra hiring" does not answer "support could not staff evening chat"',
+    lib.answeredByPlan('Live chat was abandoned in 2025 because support could not staff evening chat and customers waited over 40 minutes.', 'KF-1: In-app live chat for customers', chat) === '',
+  );
+  check(
+    'a reworded point about the same legal review is still answered when the plan rules out its topic',
+    /No recordings, transcripts or personal data are kept/.test(lib.answeredByPlan('A legal review for real-time data processing (KF-26) has been pending since March 2025 and is required before any such feature goes live.', 'KF-26: Chat transcript retention: legal review', kf)),
+  );
+  {
+    const rel = await import('./.pipeline.mjs');
+    const onprem = { key: 'PA-15', title: 'On-premise version for banks', text: 'Banks will only buy if the product runs on premise, inside their own data centre. Package the app so their IT teams can install it.' };
+    check('an own-project item sharing only generic words ("version", "app") is not about the plan', !rel.aboutThePlanForTest({ title: 'PA-20: Browser-only lite version', text: 'A lighter version that runs only in the browser, for school computers. Abandoned May 2022: large notebooks took over ten seconds to open and teachers went back to the full app.' }, onprem));
+    check('...while the real own-project precedent, in other words, still is', rel.aboutThePlanForTest({ title: 'PA-2: Self-hosted edition for enterprise customers', text: 'A version enterprise customers can run on their own servers. Cancelled because supporting dozens of customer setups needed a support team we did not have.' }, onprem));
+  }
+  check(
+    'an incidental "does not" in the plan rules nothing out',
+    lib.answeredByPlan('KF-15: Voice ordering through smart speakers was tried here before and abandoned: under 40 customers tried it in the beta.', 'KF-15: Voice ordering through smart speakers', 'Let business customers book a pickup by asking their smart speaker, so the office does not need to open the portal.') === '',
+  );
+  check(
+    'nor does a plan that merely mentions the topic without ruling it out',
+    lib.answeredByPlan('Offline editing was abandoned because two devices editing one note overwrote each other.', 'PA-1: Offline editing in the mobile app', 'Let people create and change notes with no connection, and sync when the connection returns.') === '',
+  );
+}
+
+section('19e. A difference is not a problem; an answered point is not carried over');
+{
+  const lib = await import('./.pipeline.mjs');
+  const target = { type: 'issue', key: 'SE-36', title: 'Referral bonus for customers who bring a neighbour', text: 'When a customer refers a neighbour who signs up, give the customer one free week of power after the neighbour\'s third monthly payment, the same rule as the agent referral bonus.', sections: [{ n: 1, text: 'When a customer refers a neighbour who signs up, give the customer one free week of power after the neighbour\'s third monthly payment, the same rule as the agent referral bonus.', hash: 'h1' }] };
+  const refs = { P1: { title: 'SE-6: Agent referral bonus', text: 'Agents earn a bonus for each customer who completes three payments. Owner: Adwoa Sarpong. Shipped July 2022. Bonus rules. Bonus fraud checks.' } };
+  const n = lib.normaliseRun({ assumptions: [{ id: 'A1', text: 'give the customer one free week of power after the third monthly payment', section: 1 }], objections: [{ assumption: 'A1', ref: 'P1', claim: 'The agent referral bonus (SE-6) was designed for agents, not customers, and shipped in July 2022.', impact: 3, likelihood: 3 }] }, { refs, target });
+  check('a claim that names no problem or constraint is dropped', n.objections.length === 0 && n.reasons.some((r) => /names no problem/.test(r)), n.reasons);
+  const g = lib.normaliseRun({ assumptions: [{ id: 'A1', text: 'give the customer one free week of power after the third monthly payment', section: 1 }], objections: [
+    { assumption: 'A1', ref: 'P1', claim: 'The agent referral bonus (SE-6) was designed for agents who earn a bonus for each customer, which may not account for the different verification needs of customer-to-customer referrals.', impact: 3, likelihood: 3 },
+  ] }, { refs, target });
+  check('a hedged guess with nothing that happened behind it is dropped', g.objections.length === 0 && g.reasons.some((r) => /a guess about what may happen/.test(r)), g.reasons);
+  const refs2 = { P2: { title: 'SE-7: Airtime top-up payments', text: 'Customers pay their monthly bill by sending phone airtime. Abandoned November 2022: the telcos paid the airtime money out weeks late and kept 15 percent, so systems stayed locked after customers had paid.' } };
+  const t2 = { ...target, title: 'Let customers pay their monthly bill with airtime', text: 'Let customers pay the monthly bill by sending airtime from their phone, collected through the telcos.', sections: [{ n: 1, text: 'Let customers pay the monthly bill by sending airtime from their phone, collected through the telcos.', hash: 'h9' }] };
+  const h = lib.normaliseRun({ assumptions: [{ id: 'A1', text: 'pay the monthly bill by sending airtime collected through the telcos', section: 1 }], objections: [
+    { assumption: 'A1', ref: 'P2', claim: 'Airtime top-up payments were abandoned in 2022 because the telcos paid the airtime money out weeks late, so systems may stay locked after customers pay.', impact: 4, likelihood: 4 },
+  ] }, { refs: refs2, target: t2 });
+  check('a "may" backed by what actually happened is kept', h.objections.length === 1, h.reasons);
+  const hv = { type: 'issue', key: 'HV-37', title: 'Allergen icons on the printed menus', text: 'Print small icons next to each dish for nuts, gluten, dairy and shellfish, matching the filter on the digital menu.\nThe icons come from the same allergen list as the digital menu, and the head chef signs off each printed menu before it goes to the printer.', sections: [{ n: 1, text: 'Print small icons next to each dish for nuts, gluten, dairy and shellfish, matching the filter on the digital menu.', hash: 'h1' }, { n: 2, text: 'The icons come from the same allergen list as the digital menu, and the head chef signs off each printed menu before it goes to the printer.', hash: 'h2' }] };
+  const prev = { state: 'active', objections: [{ id: 'old', ref: 'P1', docId: 'pg9', sourceTitle: 'Allergen information: kitchen guide', sourceQuote: 'The head chef signs off the list.', claim: 'The kitchen guide requires the head chef to sign off on allergen lists before they go on the menu, but the plan does not specify a sign-off for the printed version.', sectionHash: 'h1', status: 'open', severity: 'critical', score: 12 }] };
+  const f = lib.finalize({ runs: [{ assumptions: [], objections: [] }], evidence: { refs: { P1: { title: 'Allergen information: kitchen guide', text: 'Every dish has its allergens recorded before it goes on the menu. The head chef signs off the list.' } } }, target: hv, previous: prev, rules: { findings: [], checks: [] } });
+  check('an earlier point the plan now answers is not carried into the next review', !f.objections.some((o) => o.id === 'old'), f.objections.map((o) => o.id));
+}
+
 section('20. A clean result says what a rule flagged, without contradicting itself');
 {
   const clean = site.addIssue({ summary: 'Keyboard shortcuts cheat sheet', text: ['Add a page listing every keyboard shortcut, opened with the question mark key.'] });

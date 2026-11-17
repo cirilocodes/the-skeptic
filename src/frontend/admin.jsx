@@ -222,15 +222,22 @@ const DEMO_INFO = {
 // Load a demo company so the Skeptic has history to work with: the quickest way to try it on a new site.
 function DemoData({ data, busy, run, setData, setMsg }) {
   const [company, setCompany] = useState('kestrel');
-  const [project, setProject] = useState('');
-  const [space, setSpace] = useState('');
+  const [project, setProject] = useState(DEMO_INFO.kestrel.key);
+  const [space, setSpace] = useState(DEMO_INFO.kestrel.key);
   const info = DEMO_INFO[company];
+  // Choosing a company fills in its suggested keys, so a key typed for another company is never reused.
+  const choose = (id) => {
+    const next = DEMO_INFO[id] ? id : 'kestrel';
+    setCompany(next);
+    setProject(DEMO_INFO[next].key);
+    setSpace(DEMO_INFO[next].confluence ? DEMO_INFO[next].key : '');
+  };
   const status = data.demo?.[company];
   return (
     <Stack space="space.200">
       <Text>
         Try the Skeptic on a fictional company's history. There are five, each with years of work and three demo plans to review. Create an empty Jira
-        project for it first (any template; the suggested key is shown), and for companies with Confluence an empty space. Loading takes about five minutes
+        project for it first (any template, with the key filled in below), and for companies with Confluence an empty space. Loading takes about five minutes
         and is safe to repeat.
       </Text>
       <Stack space="space.050">
@@ -239,13 +246,13 @@ function DemoData({ data, busy, run, setData, setMsg }) {
           inputId="demoCompany"
           options={Object.entries(DEMO_INFO).map(([value, d]) => ({ label: d.name, value }))}
           value={{ label: info.name, value: company }}
-          onChange={(o) => setCompany(o?.value || 'kestrel')}
+          onChange={(o) => choose(o?.value)}
         />
         <Text>{info.about}</Text>
       </Stack>
       <Inline space="space.200" shouldWrap alignBlock="end">
-        <Field id="demoProject" label="Jira project key" value={project} onChange={setProject} placeholder={`e.g. ${info.key}`} />
-        {info.confluence ? <Field id="demoSpace" label="Confluence space key" value={space} onChange={setSpace} placeholder={`e.g. ${info.key}`} /> : null}
+        <Field key={`p-${company}`} id="demoProject" label="Jira project key" value={project} onChange={setProject} placeholder={`e.g. ${info.key}`} />
+        {info.confluence ? <Field key={`s-${company}`} id="demoSpace" label="Confluence space key" value={space} onChange={setSpace} placeholder={`e.g. ${info.key}`} /> : null}
       </Inline>
       <ButtonGroup>
         <Button
@@ -258,7 +265,7 @@ function DemoData({ data, busy, run, setData, setMsg }) {
             })
           }
         >
-          {`Load ${info.name}`}
+          {`Load ${info.name}${project.trim() ? ` into ${project.trim().toUpperCase()}` : ''}`}
         </Button>
         <Button appearance="subtle" isDisabled={busy} onClick={() => run('getDemo', {}, (d) => setData({ ...data, demo: d }))}>
           Check progress

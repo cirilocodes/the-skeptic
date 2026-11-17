@@ -64,7 +64,7 @@ without it.
 
 ```
 npm install
-npm test          # 549 checks in six suites, no Atlassian site needed
+npm test          # 574 checks in six suites, no Atlassian site needed
 forge deploy
 forge install --upgrade   # Jira, then Confluence
 ```
