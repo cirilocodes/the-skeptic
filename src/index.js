@@ -22,7 +22,7 @@ import { evalPlans, FREEZE } from './lib/evalset';
 import { DEMOS, demoOwnerOf, getDemoStatus, setDemoStatus } from './lib/demo/loader';
 import { computeCalibration, recordSignal } from './lib/learning';
 import { decideMatch, ledgerCsv, listLedger, listMatches } from './lib/ledger';
-import { comment, notifyApprover } from './lib/notify';
+import { comment, notifyApprover, postIssueComment } from './lib/notify';
 import { getProfile, inScope, scopeFor } from './lib/profile';
 import { radarSentence, runRadar, scoreEvidence } from './lib/radar';
 import { allowedResponses, canDecide, decideApproval, overrideGate, respond, RESPONSE_TYPES } from './lib/responses';
@@ -143,14 +143,18 @@ export async function findEvidence(payload, context) {
   return {
     ...pack.agentView,
     evidenceReused: reused,
-    reply: 'Write up to three independent passes (see your instructions), then call save-review once with runsJson. In automation, reply with the JSON only.',
+    reply: 'Write up to three independent passes (see your instructions), call check-review with runsJson, then save-review with a one-sentence plain summary (never JSON). In automation, reply with the JSON only.',
   };
 }
 
 // ---------------------------------------------------------------------------
 // Rovo action: save-review (chat). Takes one to three agent passes; the pipeline votes across them.
 // ---------------------------------------------------------------------------
-export async function saveReview(payload, context) {
+// The review reaches the app in two steps, so nobody is ever shown raw JSON: check-review (a read, which
+// Rovo runs without an approval card) takes the passes and holds them for 30 minutes; save-review (a
+// write, which Rovo asks the user to approve) carries only the plan and one plain sentence.
+const STAGE_TTL_MS = 30 * 60 * 1000;
+async function reviewContext(payload, context) {
   const ref = planRefFrom(payload);
   if (!ref) return { error: 'No plan given. Pass planKey (a work item) or pageId (a Confluence page).' };
   const reader = await readerFor(payload, context, ref);
@@ -163,14 +167,49 @@ export async function saveReview(payload, context) {
   }
   const tk = tkey(target);
   const pack = await getEvidence(tk);
-  if (!pack || Date.now() - Date.parse(pack.gatheredAt) > EVIDENCE_MAX_AGE_MS) return { error: 'Call find-evidence for this plan first, then save the review.' };
+  if (!pack || Date.now() - Date.parse(pack.gatheredAt) > EVIDENCE_MAX_AGE_MS) return { error: 'Call find-evidence for this plan first, then check and save the review.' };
   if (pack.planHash !== target.hash) return { error: 'The plan changed after the evidence was gathered. Call find-evidence again.' };
   if (pack.readMode !== reader.mode || (pack.accountId || null) !== (reader.accountId || null))
     return { error: 'The evidence was gathered for someone else. Call find-evidence again.' };
+  return { reader, target, tk, pack };
+}
+
+export async function checkReview(payload, context) {
+  const ctx = await reviewContext(payload, context);
+  if (ctx.error) return { error: ctx.error };
   const runs = parseRuns(payload.runsJson || payload.reviewJson);
   if (!runs.length) return { error: 'runsJson must hold one to three review passes (JSON objects with assumptions and objections).' };
+  await kvs.set(`staged:${ctx.tk}`, { runs, planHash: ctx.target.hash, readMode: ctx.reader.mode, accountId: ctx.reader.accountId || null, at: Date.now() });
+  const counts = runs.map((r) => (r.objections || []).length);
+  return {
+    ok: true,
+    passes: runs.length,
+    objectionsPerPass: counts,
+    next: `Checked and held for 30 minutes. Now call save-review with planKey ${ctx.target.key || ''} and a one-sentence plain summary of what you are saving, for example "4 objections: 3 critical, 1 high". No JSON in the summary.`.replace(' planKey  ', ' '),
+  };
+}
+
+export async function saveReview(payload, context) {
+  const ctx = await reviewContext(payload, context);
+  if (ctx.error) return { error: ctx.error };
+  const { reader, target, tk, pack } = ctx;
+  let runs = [];
+  if (payload.runsJson !== undefined || payload.reviewJson !== undefined) {
+    // Older agents pass the passes here directly.
+    runs = parseRuns(payload.runsJson || payload.reviewJson);
+    if (!runs.length) return { error: 'runsJson must hold one to three review passes (JSON objects with assumptions and objections).' };
+  } else {
+    const staged = await kvs.get(`staged:${tk}`);
+    if (!staged || Date.now() - staged.at > STAGE_TTL_MS) return { error: 'Call check-review with the three passes first, then save-review.' };
+    if (staged.planHash !== target.hash) return { error: 'The plan changed after the review was checked. Call find-evidence again.' };
+    if (staged.readMode !== reader.mode || staged.accountId !== (reader.accountId || null)) return { error: 'That review was checked for someone else. Call check-review again.' };
+    runs = staged.runs;
+  }
+  if (!runs.length) return { error: 'Call check-review with the three passes first, then save-review.' };
   const { settings } = await scopeNow();
-  return saveFromRuns({ target, pack, runs, requestedBy: accountIdFrom(payload, context), channel: 'chat', settings });
+  const out = await saveFromRuns({ target, pack, runs, requestedBy: accountIdFrom(payload, context), channel: 'chat', settings });
+  await kvs.delete(`staged:${tk}`).catch(() => {});
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -236,8 +275,8 @@ export async function gateStatus(payload, context) {
   const [stored, radar] = await Promise.all([getReview(tkey(target)), getRadar(target.id)]);
   const review = stored ? await reviewForViewer(stored, reader) : null;
   const blocking = blockingObjections(review, settings.gateMinSeverity);
-  const needsReview = !review && settings.requireReviewOnHigh && inScope(target, scope) && radar?.level === 'high';
-  const state = review?.override ? 'overridden' : blocking.length ? 'blocked' : needsReview ? 'review required' : 'clear';
+  const verdict = target.type === 'issue' ? await gateVerdict(String(target.id), target, settings, scope, stored) : { state: review?.override ? 'overridden' : blocking.length ? 'blocked' : 'clear' };
+  const state = verdict.state;
   return {
     plan: target.label,
     canStart: state === 'clear' || state === 'overridden',
@@ -250,7 +289,9 @@ export async function gateStatus(payload, context) {
       state === 'blocked'
         ? 'Answer the blocking objections (respond-to-objection, or the Skeptic panel) before starting.'
         : state === 'review required'
-          ? 'Ask for a Skeptic review first: the radar found this organisation has tried something like it.'
+          ? verdict.kind === 'draft'
+            ? 'Ask for a full Skeptic review: a draft from history is not enough to start.'
+            : 'Ask for a Skeptic review first (Review now in the Skeptic panel).'
           : 'Nothing in the Skeptic gate stops this plan.',
   };
 }
@@ -426,6 +467,7 @@ async function panelView(context, reviewIn) {
     me,
     inScope: inScope(target, scope),
     binding: target.type === 'issue' && target.statusCategory !== 'new',
+    blockingCount: review ? blockingObjections(review, settings.gateMinSeverity).length : 0,
     statusName: target.statusName || '',
     gateMinSeverity: settings.gateMinSeverity,
     automationReady: !!settings.automationReady,
@@ -441,7 +483,13 @@ async function panelView(context, reviewIn) {
       : null,
     index: { state: meta.state, docs: meta.docs || 0 },
     density: scope.density,
-    reviewRequired: !review && radar?.level === 'high' && settings.requireReviewOnHigh,
+    reviewRequired:
+      target.type === 'issue' && inScope(target, scope) && (settings.requireFullReview ? !review || !!review.draft : !review && radar?.level === 'high' && settings.requireReviewOnHigh) && !review?.override
+        ? review?.draft
+          ? 'draft'
+          : 'none'
+        : null,
+    radarHigh: radar?.level === 'high',
     agentPrompt: target.type === 'page' ? `Review this Confluence page as a proposal (page ${target.id}).` : `Review ${target.key} as a plan (planKey ${target.key}). This is a new review: call find-evidence for ${target.key} and use only its results.`,
   };
   if (!review) return { ...base, review: null };
@@ -496,6 +544,10 @@ resolver.define('getGlance', async ({ context }) => {
     draft: !!review?.draft,
     radar: !review && radar ? { level: radar.level, found: radarSentence(radar.counts || {}) } : null,
     binding: target.type === 'issue' && target.statusCategory !== 'new',
+    createdAt: review?.createdAt || null,
+    // What the gate needs before this plan can start, and the one-click way to get it.
+    gate: target.type === 'issue' ? await scopeNow().then(({ settings: st, scope }) => gateVerdict(String(target.id), target, st, scope, stored)).then((v) => ({ ok: v.ok, kind: v.kind || null, blocking: v.blocking?.length || 0 })) : null,
+    agentPrompt: target.type === 'issue' ? `Review ${target.key} as a plan (planKey ${target.key}). This is a new review: call find-evidence for ${target.key} and use only its results.` : null,
   };
 });
 
@@ -728,9 +780,36 @@ resolver.define('getInsights', async ({ payload, context }) => {
   summary.projects = projects;
   summary.project = project;
   summary.gateMinSeverity = settings.gateMinSeverity;
-  summary.background = !!(settings.autoReview && settings.automationReady);
+  summary.background = !!settings.autoReview;
+  summary.backgroundMode = settings.automationReady ? 'ai' : 'draft';
+  summary.canAdmin = await isJiraAdmin();
   return summary;
 });
+
+// The one switch for background reviews, on the dashboard: Jira admins only.
+async function isJiraAdmin() {
+  try {
+    const data = await json(await client('user').jira(route`/rest/api/3/mypermissions?permissions=ADMINISTER`), 'permissions');
+    return !!data?.permissions?.ADMINISTER?.havePermission;
+  } catch {
+    return false;
+  }
+}
+resolver.define('setBackground', async ({ payload, context }) => {
+  if (!(await isJiraAdmin())) throw new Error('Only a Jira admin can switch background reviews on or off.');
+  const before = await getSettings();
+  const settings = await saveSettings({ autoReview: !!payload?.on });
+  if (settings.autoReview && !before.autoReview) await catchUpFlagged(context.accountId);
+  return { background: !!settings.autoReview, backgroundMode: settings.automationReady ? 'ai' : 'draft' };
+});
+
+// Switching background reviews on: plans the radar already flagged, with no review yet, get one now.
+// The admin who switched it on stands in for plans with no human owner (the app created them).
+async function catchUpFlagged(accountId) {
+  const flagged = (await listRadars()).filter((r) => r.level && r.level !== 'low' && !r.reviewed).slice(0, 50);
+  for (const r of flagged) await enqueue({ type: 'prep', id: r.issueId, reason: 'switched-on', owner: accountId || null, requestedAt: new Date().toISOString() });
+  return flagged.length;
+}
 
 resolver.define('decideMatch', async ({ payload, context }) => {
   const rec = (await listMatches()).find((m) => m.key === payload.key);
@@ -803,13 +882,27 @@ export function setupChecklist({ settings, meta, health }) {
             : `${meta.docs} items indexed`,
     },
     {
-      id: 'rule',
-      label: 'Automation rule sending reviews',
-      done: !!settings.automationReady && !!seen.intake,
-      detail: seen.intake ? `Last review received ${ago(seen.intake.at)}` : settings.automationReady ? 'Switched on, but no review has arrived yet: start one from a plan' : 'Optional: set it up on the Background reviews tab for reviews without chat',
-      optional: true,
+      id: 'background',
+      label: 'Background reviews',
+      done: !!settings.autoReview,
+      detail: !settings.autoReview
+        ? 'Off: switch it on in Background reviews, or on the dashboard'
+        : settings.automationReady
+          ? seen.intake
+            ? `On, full AI reviews through the automation rule (last one ${ago(seen.intake.at)})`
+            : 'On, through the automation rule: no review has arrived yet, start one from a plan'
+          : 'On: flagged plans get a cited draft straight away; Review now opens Rovo for the full review',
     },
-    { id: 'gate', label: 'Workflow validator added', done: recent(seen.gate?.at, 30), detail: seen.gate ? `Last checked a transition ${ago(seen.gate.at)}` : 'Add "Skeptic objections resolved" to the transition out of To Do', optional: true },
+    {
+      id: 'gate',
+      label: 'Gate on starting plans',
+      done: !!settings.enforceGate || recent(seen.gate?.at, 30),
+      detail: recent(seen.gate?.at, 30)
+        ? `The workflow validator blocks early starts (last checked a transition ${ago(seen.gate.at)})`
+        : settings.enforceGate
+          ? 'On: a plan moved out of To Do too early is moved back. Optional: add the validator "Skeptic objections resolved" for a clean block'
+          : 'Off: turn on "Move a plan back if it starts too early" on the Gate tab, or add the workflow validator',
+    },
     { id: 'approvers', label: 'Approvers for high risks', done: (settings.approvers || []).length > 0, detail: (settings.approvers || []).length ? `${settings.approvers.length} named` : 'Anyone except the author can sign off until you name approvers', optional: true },
     { id: 'decisions', label: 'Space for decision records', done: !!settings.decisionSpaceKey, detail: settings.decisionSpaceKey ? `Confluence space ${settings.decisionSpaceKey}` : 'Set one on the Notifications tab so decisions are recorded', optional: true },
   ];
@@ -888,7 +981,10 @@ resolver.define('saveAdmin', async ({ payload, context }) => {
     }
     input.projectKeys = real;
   }
-  return { settings: await saveSettings(input), warnings };
+  const before = await getSettings();
+  const settings = await saveSettings(input);
+  if (settings.autoReview && !before.autoReview) await catchUpFlagged(context.accountId);
+  return { settings, warnings };
 });
 resolver.define('rotateSecret', async ({ context }) => {
   requireAdminModule(context);
@@ -1022,6 +1118,92 @@ export async function bylineProps(payload) {
 }
 
 // ---------------------------------------------------------------------------
+// The gate's rule, in one place: the workflow validator, the start guard, the panel and gate-status all
+// use it. A plan in scope cannot start until (1) it has a full review (a draft written from history is not
+// enough: someone has to ask for the review) and (2) its objections at the gate's severity are answered.
+// A review with blocking objections always counts, whatever the work item's type or labels are now, so
+// relabelling (skeptic-ignore) or retyping a plan is not a way around the gate. An override clears it.
+// ---------------------------------------------------------------------------
+export async function gateVerdict(issueId, target, settings, scope, stored) {
+  const review = stored === undefined ? await getReview(String(issueId)) : stored;
+  if (review?.override) return { ok: true, state: 'overridden', review };
+  const gated = inScope(target, scope);
+  if (gated && settings.requireFullReview && (!review || review.draft))
+    return {
+      ok: false,
+      state: 'review required',
+      kind: review ? 'draft' : 'none',
+      review,
+      message: review
+        ? 'Blocked by the Skeptic: this plan only has a draft review written from history. Open the Skeptic panel on this work item and choose Full review in Rovo chat; the plan can start once that review is in and its serious objections are answered.'
+        : 'Blocked by the Skeptic: this plan has not been reviewed. Open the Skeptic panel on this work item and choose Review now (about a minute); the plan can start once the review is in and its serious objections are answered.',
+    };
+  const blocking = blockingObjections(review, settings.gateMinSeverity);
+  if (blocking.length) {
+    const list = blocking
+      .slice(0, 3)
+      .map((o, i) => `${i + 1}) [${o.severity}${o.status === 'pending-approval' ? ', awaiting sign-off' : ''}] ${clip(o.claim, 90)}`)
+      .join(' ');
+    const waiting = blocking.filter((o) => o.status === 'pending-approval').length;
+    return {
+      ok: false,
+      state: 'blocked',
+      kind: 'objections',
+      review,
+      blocking,
+      message: `Blocked by the Skeptic: ${blocking.length} unresolved objection${blocking.length === 1 ? '' : 's'} at ${settings.gateMinSeverity} or above${waiting ? ` (${waiting} awaiting sign-off)` : ''}. Answer them in the Skeptic panel on this work item: ${list}${blocking.length > 3 ? ` and ${blocking.length - 3} more` : ''}. In an emergency a project admin can override the gate from the panel; overrides are logged.`,
+    };
+  }
+  if (gated && !review && settings.requireReviewOnHigh) {
+    const radar = await getRadar(String(issueId));
+    if (radar?.level === 'high')
+      return {
+        ok: false,
+        state: 'review required',
+        kind: 'none',
+        review,
+        message: `Blocked by the Skeptic: the radar found that your organisation has tried something like this before (${radarSentence(radar.counts || {}) || 'related history'}). Ask for a review in the Skeptic panel on this work item first; it takes about a minute.`,
+      };
+  }
+  return { ok: true, state: 'clear', review };
+}
+
+// The start guard: the Skeptic enforces its gate even where nobody added the workflow validator. A plan
+// moved out of To Do before the gate is clear is moved straight back, with a comment saying what is missing.
+// (The app's own transition does not fire this trigger again: ignoreSelf.)
+async function guardStart(id, change) {
+  const app = appClient();
+  const statusOf = async (sid) => (sid ? json(await app.jira(route`/rest/api/3/status/${sid}`), 'guard status').catch(() => null) : null);
+  const [from, to] = [await statusOf(change.from), await statusOf(change.to)];
+  if (from?.statusCategory?.key !== 'new' || !to || to.statusCategory?.key === 'new') return null;
+  const issue = await json(await app.jira(route`/rest/api/3/issue/${id}?fields=status,issuetype,labels,project`), 'guard issue');
+  const { settings, scope } = await scopeNow();
+  const target = { type: 'issue', issueType: issue.fields.issuetype?.name, labels: issue.fields.labels || [], projectKey: issue.fields.project?.key };
+  const verdict = await gateVerdict(String(id), target, settings, scope);
+  if (verdict.ok) return null;
+  const list = await json(await app.jira(route`/rest/api/3/issue/${id}/transitions`), 'guard transitions');
+  const options = list?.transitions || [];
+  const back = options.find((t) => String(t.to?.id) === String(change.from)) || options.find((t) => t.to?.statusCategory?.key === 'new');
+  let moved = false;
+  if (back) {
+    const res = await app.jira(route`/rest/api/3/issue/${id}/transitions`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ transition: { id: back.id } }) });
+    moved = res.ok;
+  }
+  const rest = verdict.message.replace(/^Blocked by the Skeptic: /, '');
+  const why = rest.charAt(0).toUpperCase() + rest.slice(1);
+  await postIssueComment(id, [
+    [
+      { text: 'The Skeptic: ', bold: true },
+      moved
+        ? `this plan was moved to ${to.name} before the gate was clear, so it is back in ${back.to?.name || from.name}. ${why}`
+        : `this plan was moved to ${to.name} before the gate was clear, and the Skeptic could not move it back (no transition to To Do). ${why}`,
+    ],
+  ]);
+  await markSeen('guard', { key: issue.key || String(id), moved });
+  return { moved, state: verdict.state };
+}
+
+// ---------------------------------------------------------------------------
 // Workflow gate. Reads the ledger from KVS, which users cannot edit. Advisory while a plan is in To Do;
 // binding on any move out of To Do. Moving back to To Do is always allowed. Only plans in scope are gated.
 // ---------------------------------------------------------------------------
@@ -1036,31 +1218,9 @@ export async function gate(args) {
       if (status?.statusCategory?.key === 'new') return { result: true };
     }
     const { settings, scope } = await scopeNow();
-    // A review with blocking objections always counts, whatever the work item's type or labels are now,
-    // so relabelling (skeptic-ignore) or retyping a plan is not a way around the gate.
-    const review = await getReview(String(issue.id));
-    if (review?.override) return { result: true };
-    const blocking = blockingObjections(review, settings.gateMinSeverity);
-    if (blocking.length) {
-      const list = blocking
-        .slice(0, 3)
-        .map((o, i) => `${i + 1}) [${o.severity}${o.status === 'pending-approval' ? ', awaiting sign-off' : ''}] ${clip(o.claim, 90)}`)
-        .join(' ');
-      const waiting = blocking.filter((o) => o.status === 'pending-approval').length;
-      return {
-        result: false,
-        errorMessage: `Blocked by the Skeptic: ${blocking.length} unresolved objection${blocking.length === 1 ? '' : 's'} at ${settings.gateMinSeverity} or above${waiting ? ` (${waiting} awaiting sign-off)` : ''}. Answer them in the Skeptic panel on this work item: ${list}${blocking.length > 3 ? ` and ${blocking.length - 3} more` : ''}. In an emergency a project admin can override the gate from the panel; overrides are logged.`,
-      };
-    }
     const target = { type: 'issue', issueType: issue.fields.issuetype?.name, labels: issue.fields.labels || [], projectKey: issue.fields.project?.key };
-    if (!review && settings.requireReviewOnHigh && inScope(target, scope)) {
-      const radar = await getRadar(String(issue.id));
-      if (radar?.level === 'high')
-        return {
-          result: false,
-          errorMessage: `Blocked by the Skeptic: the radar found that your organisation has tried something like this before (${radarSentence(radar.counts || {}) || 'related history'}). Ask for a review in the Skeptic panel on this work item first; it takes about a minute.`,
-        };
-    }
+    const verdict = await gateVerdict(String(issue.id), target, settings, scope);
+    if (!verdict.ok) return { result: false, errorMessage: verdict.message };
     return { result: true };
   } catch (e) {
     console.error('Skeptic gate error', e.message);
@@ -1094,6 +1254,16 @@ export async function onIssueUpdated(event) {
   const label = items.find((i) => i.field === 'labels');
   if (label && String(label.toString || '').split(' ').includes(REVIEW_LABEL) && !String(label.fromString || '').split(' ').includes(REVIEW_LABEL))
     await setProgress(id, 'queued', { source: 'label' });
+
+  const statusChange = items.find((i) => i.field === 'status');
+  if (statusChange && settings.enforceGate) {
+    try {
+      await guardStart(id, statusChange);
+    } catch (e) {
+      // Fail open: a Skeptic outage never freezes a team's workflow.
+      await recordError('start guard', e);
+    }
+  }
 
   if (fields.includes('status')) {
     const review = await getReview(id);

@@ -34,7 +34,9 @@ const p90 = (values) => {
 
 export function timingStats(reviews) {
   const recent = [...reviews].sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))).slice(0, 50);
-  const ready = recent.map((r) => r.timing?.readyMs).filter((x) => Number.isFinite(x) && x > 0);
+  // Full reviews only: a draft from history takes a second or two and would hide what a review costs.
+  const ready = recent.filter((r) => !r.draft).map((r) => r.timing?.readyMs).filter((x) => Number.isFinite(x) && x > 0);
+  const drafts = recent.filter((r) => r.draft).map((r) => r.timing?.readyMs).filter((x) => Number.isFinite(x) && x > 0);
   const background = recent.filter((r) => r.channel === 'automation').map((r) => r.timing?.readyMs).filter((x) => Number.isFinite(x) && x > 0);
   const author = recent.map((r) => r.authorMs).filter((x) => Number.isFinite(x) && x > 0);
   return {
@@ -43,6 +45,8 @@ export function timingStats(reviews) {
     readyBackgroundMedianMs: median(background),
     readyBackgroundP90Ms: p90(background),
     readySamples: ready.length,
+    draftMedianMs: median(drafts),
+    draftSamples: drafts.length,
     authorMedianMs: median(author),
     authorSamples: author.length,
   };
@@ -102,8 +106,12 @@ export function summariseReviews(reviews, outcomes, radars, extra = {}) {
     handledByPlan: reviews.reduce((n, r) => n + (r.handled || []).length, 0),
     worthAsking: reviews.reduce((n, r) => n + (r.worthAsking || []).length, 0),
     droppedByChecks: reviews.reduce((n, r) => n + Object.values(r.dropped || {}).reduce((a, b) => a + b, 0), 0),
+    // Plans with only a draft wait for a full review first (when the gate asks for one).
+    needsFullReview: issueReviews
+      .filter((r) => r.state === 'active' && r.draft && r.requireFullReview !== false && !r.override)
+      .map((r) => ({ key: r.planKey, title: r.planSummary, url: r.planUrl, points: (r.objections || []).length })),
     gated: issueReviews
-      .filter((r) => r.state === 'active' && blocking(r).length && !r.override)
+      .filter((r) => r.state === 'active' && blocking(r).length && !r.override && !(r.draft && r.requireFullReview !== false))
       .map((r) => ({ key: r.planKey, title: r.planSummary, url: r.planUrl, blocking: blocking(r).length, binding: !!r.binding })),
     approvals: issueReviews.flatMap((r) =>
       (r.objections || [])

@@ -23,11 +23,12 @@ import ForgeReconciler, {
   Strong,
   Text,
   Textfield,
+  Toggle,
   User,
   xcss,
 } from '@forge/react';
 import { invoke } from '@forge/bridge';
-import { card, plural, seconds, SEVERITY_LOOK, VERDICT_LOOK } from './shared';
+import { Brand, card, plural, seconds, SEVERITY_LOOK, VERDICT_LOOK } from './shared';
 
 // Soft, friendly surfaces: pastel tiles, light grey cards, no hard borders or shadows. UI Kit allows only
 // the standard corner radius, so softness comes from colour and spacing instead.
@@ -161,11 +162,14 @@ function App() {
 
   if (!data.reviews && !data.project)
     return (
+      <Stack space="space.200">
+      <Brand />
       <EmptyState
         header="No reviews yet"
         headingLevel={2}
-        description="Open a plan (an epic or initiative) and choose Review now in the Skeptic panel, or ask the Skeptic in Rovo chat. Reviews, objections, approvals and the risk ledger appear here, filtered to what you can see."
+        description="Open a plan (an epic or initiative) and choose Review now in the Skeptic panel, or ask the Skeptic in Rovo chat. Reviews, objections, approvals and the risk ledger appear here, filtered to what you can see. Trying it out? A Jira admin can load one of five demo companies, each with years of history and three plans to review, from The Skeptic settings → Demo data."
       />
+      </Stack>
     );
 
   const cited = (data.mostCited || []).filter((m) => m.plans > 1);
@@ -188,15 +192,43 @@ function App() {
       <Box xcss={hero}>
         <Inline spread="space-between" alignBlock="center" shouldWrap rowSpace="space.150">
           <Stack space="space.100">
+            <Brand />
             <Heading size="medium">Here's how your plans are doing</Heading>
             <Text color="color.text.subtle">{summaryLine(data)}</Text>
             <Inline space="space.075" shouldWrap>
               <Lozenge appearance={data.index?.state === 'ready' ? 'success' : 'inprogress'}>
                 {data.index?.state === 'ready' ? `knows ${(data.index?.docs || 0).toLocaleString('en')} past items` : `still reading history · ${data.index?.docs || 0} so far`}
               </Lozenge>
-              <Lozenge appearance={data.background ? 'success' : 'default'}>{data.background ? 'reviews run on their own' : 'reviews on request'}</Lozenge>
+              {data.canAdmin ? null : <Lozenge appearance={data.background ? 'success' : 'default'}>{data.background ? 'reviews run on their own' : 'reviews on request'}</Lozenge>}
               <Lozenge appearance="new">{`gate at ${data.gateMinSeverity || 'medium'} and up`}</Lozenge>
             </Inline>
+            {data.canAdmin ? (
+              <Inline space="space.100" alignBlock="center">
+                <Toggle
+                  id="background"
+                  isChecked={!!data.background}
+                  isDisabled={busy}
+                  onChange={() => {
+                    // Flip at once; the server confirms in the background.
+                    const on = !data.background;
+                    setData({ ...data, background: on });
+                    invoke('setBackground', { on })
+                      .then((r) => setData((d) => ({ ...d, ...r })))
+                      .catch((e) => {
+                        setData((d) => ({ ...d, background: !on }));
+                        setError(e.message || String(e));
+                      });
+                  }}
+                />
+                <Label labelFor="background">
+                  {data.background
+                    ? data.backgroundMode === 'ai'
+                      ? 'Background reviews on: full AI reviews through your automation rule'
+                      : 'Background reviews on: flagged plans get a cited draft at once'
+                    : 'Background reviews off: plans are reviewed when someone asks'}
+                </Label>
+              </Inline>
+            ) : null}
           </Stack>
           {(data.projects || []).length > 1 || data.project ? (
             <Inline space="space.100" alignBlock="center">
@@ -225,7 +257,18 @@ function App() {
       ) : null}
 
       <Inline space="space.200" shouldWrap>
-        <Tile tone="blue" label="⏱️ A review is ready in" value={seconds(t.readyMedianMs)} note={t.readySamples ? `typical of ${plural(t.readySamples, 'recent review')} · ${seconds(t.readyBackgroundMedianMs)} when it runs on its own` : 'No reviews yet'} />
+        <Tile
+          tone="blue"
+          label="⏱️ A full review is ready in"
+          value={seconds(t.readyMedianMs)}
+          note={
+            t.readySamples
+              ? `typical of ${plural(t.readySamples, 'recent review')}${t.draftSamples ? ` · drafts from history in ${seconds(t.draftMedianMs)}` : ''}`
+              : t.draftSamples
+                ? `no full review yet · drafts from history in ${seconds(t.draftMedianMs)}`
+                : 'No reviews yet'
+          }
+        />
         <Tile tone="purple" label="✍️ Authors spend" value={seconds(t.authorMedianMs)} note={t.authorSamples ? `answering, across ${plural(t.authorSamples, 'review')}` : 'No answers yet'} />
         <Tile
           tone="green"
@@ -243,6 +286,24 @@ function App() {
         <Tile label="✅ Already handled" value={data.handledByPlan} note="points the plan had already covered" />
       </Inline>
 
+      {data.needsFullReview?.length ? (
+        <Section title="Waiting for a full review before they can start" count={data.needsFullReview.length} badge="warning" empty="">
+          <Stack space="space.0">
+            {data.needsFullReview.map((g) => (
+              <Box key={g.key} xcss={row}>
+                <Inline space="space.100" alignBlock="center" shouldWrap>
+                  <Lozenge appearance="new">draft only</Lozenge>
+                  <Link href={g.url} openNewTab>{`${g.key} · ${g.title}`}</Link>
+                  <Text size="small" color="color.text.subtlest">
+                    open it and choose Full review in Rovo chat
+                  </Text>
+                </Inline>
+              </Box>
+            ))}
+          </Stack>
+        </Section>
+      ) : null}
+
       <Section title="Waiting on answers before they can start" count={data.gated?.length} badge="warning" empty="No plan is waiting. Nice.">
         {data.gated?.length ? (
           <Stack space="space.0">
@@ -251,11 +312,11 @@ function App() {
                 <Inline space="space.100" alignBlock="center" shouldWrap>
                   <Lozenge appearance="moved">{`${g.blocking} to answer`}</Lozenge>
                   <Link href={g.url} openNewTab>{`${g.key} · ${g.title}`}</Link>
-                  {g.binding ? null : (
+                  {g.binding ? (
                     <Text size="small" color="color.text.subtlest">
-                      only advice until it starts
+                      already started: the gate is active
                     </Text>
-                  )}
+                  ) : null}
                 </Inline>
               </Box>
             ))}

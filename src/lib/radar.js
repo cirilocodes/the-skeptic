@@ -146,6 +146,8 @@ export async function runRadar(issueId, settings, { force = false, profile = nul
       [
         settings.autoReview && settings.automationReady
           ? 'A full, cited review is being prepared and will appear in the Skeptic panel.'
+          : settings.autoReview
+            ? 'A draft review citing that history is in the Skeptic panel (from the apps button under the title, if it is not shown). Choose Full review in Rovo chat for a complete AI review.'
           : settings.requireReviewOnHigh
             ? 'It needs a full Skeptic review before it can start. Open the Skeptic panel (from the apps button under the title, if it is not shown) and choose Review now.'
             : 'Ask the Skeptic in the panel for a cited review before starting.',

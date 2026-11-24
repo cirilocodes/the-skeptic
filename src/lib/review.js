@@ -175,6 +175,7 @@ export async function saveFromRuns({ target, pack, runs, requestedBy, channel, s
     statusName: target.statusName || '',
     binding: target.type === 'issue' && target.statusCategory !== 'new',
     gateMinSeverity: settings.gateMinSeverity,
+    requireFullReview: settings.requireFullReview !== false,
     terms: pack.terms,
     verdict: result.verdict,
     summary: result.objections.length

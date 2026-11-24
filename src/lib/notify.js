@@ -82,11 +82,12 @@ export function headline(review) {
 
 function gateLine(review) {
   // The summary above already says what was checked; this line only says what it means for the gate.
-  if (!(review.objections || []).length) return 'Nothing here stops the plan from starting.';
-  if (review.targetType !== 'issue') return 'Answer the objections in the Skeptic byline panel on this page.';
-  return review.binding
-    ? `Objections at ${review.gateMinSeverity} or above must be answered in the Skeptic panel before this plan can move on.`
-    : `Advisory while the plan is in ${review.statusName || 'To Do'}: the gate applies when it moves on. Answer in the Skeptic panel.`;
+  if (review.targetType !== 'issue') return (review.objections || []).length ? 'Answer the objections in the Skeptic byline panel on this page.' : 'Nothing in your history contradicts this proposal.';
+  // A draft is a head start: the plan cannot start until someone asks for the full review.
+  if (review.draft && review.requireFullReview !== false)
+    return 'This is a draft from history. Before the plan can start, choose Full review in Rovo chat in the Skeptic panel, then answer its serious objections.';
+  if (!(review.objections || []).length) return 'Nothing in the Skeptic gate stops this plan from starting.';
+  return `Objections at ${review.gateMinSeverity} or above must be answered in the Skeptic panel before this plan can start.`;
 }
 
 // Comments are visible to everyone who can see the plan, who may not all see every cited item. A comment

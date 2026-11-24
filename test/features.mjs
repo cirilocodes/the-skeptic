@@ -210,11 +210,11 @@ section('7. The setup checklist');
   const a = await R('getAdmin', {}, ADMIN);
   const byId = Object.fromEntries(a.checklist.map((i) => [i.id, i]));
   check('the index item is done', byId.index.done === true, byId.index);
-  check('the automation item is done once a review has arrived', byId.rule.done === true, byId.rule);
-  check('the validator item waits until the gate has run', byId.gate.done === false);
+  check('the background item is done, and says reviews arrive through the automation rule', byId.background.done === true && /automation rule/.test(byId.background.detail), byId.background);
+  check('the gate item is on with no workflow changes: early starts are moved back', byId.gate.done === true && /moved back/.test(byId.gate.detail), byId.gate);
   await app.gate({ issue: { key: plan.key }, transition: { to: { id: '1' } } });
   const a2 = await R('getAdmin', {}, ADMIN);
-  check('after a transition check, the validator item is done', a2.checklist.find((i) => i.id === 'gate').done === true);
+  check('after a transition check, the item says the validator blocks early starts', /validator blocks early starts/.test(a2.checklist.find((i) => i.id === 'gate').detail));
   check('fast setup is the default: one prompt and one body', a2.rule.fast && a2.rule.pairs.length === 1 && /all lenses/.test(a2.rule.pairs[0].prompt) && /run=all$/.test(a2.rule.pairs[0].query) && a2.rule.pairs[0].body === '{{agentResponse}}');
   await R('saveAdmin', { setupMode: 'thorough', automationRuns: 2 }, ADMIN);
   const a3 = await R('getAdmin', {}, ADMIN);
@@ -305,17 +305,58 @@ section('10. Measure precision from the admin page (40 labelled plans, drafts wi
 // ------------------------------------------------------------------------------------------------
 section('11. Gate status for people and coding agents (MCP)');
 {
+  const g0 = await app.gateStatus({ planKey: plan.key }, { accountId: 'u1' });
+  check('a plan with only a draft review cannot start: someone has to ask for the full review', g0.canStart === false && g0.state === 'review required' && /full Skeptic review/.test(g0.next), g0);
+  // A full review (from Rovo) of the same plan, with the same objections:
+  const full = (k) => KVS.set(`review:${site.byKey.get(k).id}`, { ...KVS.get(`review:${site.byKey.get(k).id}`), draft: false, channel: 'chat' });
+  full(plan.key);
   const g = await app.gateStatus({ planKey: plan.key }, { accountId: 'u1' });
   check('a plan with blocking objections cannot start, and says why', g.canStart === false && g.state === 'blocked' && g.blocking.length >= 1 && /Answer the blocking/.test(g.next), g);
   check('blocking objections are numbered like the panel', g.blocking.every((b) => Number.isInteger(b.number) && b.number >= 1));
+  full(honest.key);
   const h = await app.gateStatus({ planKey: honest.key }, { accountId: 'u1' });
-  check('a clean plan can start', h.canStart === true && h.state === 'clear', h);
+  check('a clean plan with a full review can start', h.canStart === true && h.state === 'clear', h);
   const fresh = site.addIssue({ summary: 'Live chat on the website for customers', text: ['Customers chat with support from the website, answered by the support team.'] });
   await app.onIssueCreated({ issue: { id: fresh.id } });
   await Q.drain();
   const f = await app.gateStatus({ planKey: fresh.key }, { accountId: 'u1' });
   check('an unreviewed plan the radar rates high needs a review first', f.state === 'review required' && f.canStart === false, f);
   check('a missing or restricted plan is refused without details', /don't have access/.test((await app.gateStatus({ planKey: 'KF-9999' }, { accountId: 'u1' })).error || ''));
+}
+
+section('11b. The Skeptic enforces its gate with no workflow changes');
+{
+  const move = async (issue, from, to) => {
+    issue.fields.status = to;
+    await app.onIssueUpdated({ issue: { id: issue.id }, changelog: { items: [{ field: 'status', from: from.id, fromString: from.name, to: to.id, toString: to.name }] } });
+  };
+  const TODO = { id: '1', name: 'To Do', statusCategory: { key: 'new' } };
+  const DOING = { id: '3', name: 'In Progress', statusCategory: { key: 'indeterminate' } };
+  const unreviewed = site.addIssue({ summary: 'A brand new idea nobody reviewed', text: ['Something new for the team.'] });
+  const before = site.comments.length;
+  await move(unreviewed, TODO, DOING);
+  check('a plan with no review that starts is moved back to To Do', unreviewed.fields.status.statusCategory.key === 'new', unreviewed.fields.status);
+  const said = site.comments.slice(before).map((c) => c.text).join(' ');
+  check('...with a comment saying to choose Review now', /moved to In Progress before the gate was clear/.test(said) && /Review now/.test(said), said.slice(0, 300));
+  const p = site.byKey.get(plan.key);
+  await move(p, TODO, DOING);
+  check('a reviewed plan with unanswered blocking objections is moved back too', p.fields.status.statusCategory.key === 'new');
+  const h = site.byKey.get(honest.key);
+  await move(h, TODO, DOING);
+  check('a clean plan with a full review stays in progress', h.fields.status.statusCategory.key === 'indeterminate');
+  const drafted = site.addIssue({ summary: 'Another idea with a draft only', text: ['Something else.'] });
+  await R('draftReview', {}, { accountId: 'u1', extension: { issue: { id: drafted.id, key: drafted.key } } });
+  await move(drafted, TODO, DOING);
+  check('a plan with only a draft is moved back: someone has to ask for the full review', drafted.fields.status.statusCategory.key === 'new');
+  const v = await app.gate({ issue: { key: drafted.key }, transition: { to: { id: '3' } } });
+  check('the workflow validator gives the same answer, before the move', v.result === false && /only has a draft review/.test(v.errorMessage), v);
+  await R('saveAdmin', { enforceGate: false }, ADMIN);
+  await move(drafted, TODO, DOING);
+  check('with the guard switched off, nothing is moved', drafted.fields.status.statusCategory.key === 'indeterminate');
+  drafted.fields.status = TODO;
+  await R('saveAdmin', { enforceGate: true }, ADMIN);
+  await move(h, DOING, TODO);
+  check('moving back to To Do is never stopped', h.fields.status.statusCategory.key === 'new');
 }
 
 section('12. Signed requests, retention, CSV export, service-management incident types');

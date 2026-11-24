@@ -152,8 +152,31 @@ async function prep(job, settings, profile) {
     await setProgress(String(target.id), 'agent', { waitingFor: 'automation', runs: 0, expected: settings.automationRuns });
     await setReviewLabel(target.id, true);
     await enqueue({ type: 'finalize', tk: String(target.id) }, FINALIZE_AFTER_S);
+    return { level: record.level, requested: true };
   }
-  return { level: record.level, requested: wantsReview };
+  // No automation rule (the default): write the cited draft straight away, from history and without AI,
+  // so a flagged plan never waits for anyone. A full Rovo review replaces it with one click in the panel.
+  // Needs a plan owner: citations are limited to what that person can see. A plan the app created (a
+  // demo plan) has none, so the job names the admin who asked for it.
+  const owner = target.ownerAccountId || job.owner || null;
+  const wantsDraft = !evalPlan && settings.autoReview && !settings.automationReady && inScope(target, scope) && record.level !== 'low' && !record.reviewed && !!owner;
+  if (wantsDraft) {
+    const tk = String(target.id);
+    const current = await getReview(tk);
+    if (current && current.planHash === target.hash) return { level: record.level, drafted: false };
+    await setProgress(tk, 'queued', { source: 'background', requestedAt: job.requestedAt || new Date().toISOString() });
+    try {
+      // As the app, limited to what the plan's owner can see (as automation reviews are).
+      const reader = { c: appClient(), mode: 'owner-filtered', accountId: owner };
+      const { pack } = await buildPack({ reader, target, settings, scope, siteUrl: await getSiteUrl(reader.c), reuse: false });
+      await saveDraft({ target, pack, requestedBy: 'background', settings });
+    } catch (e) {
+      await setProgress(tk, 'failed', { error: `The background draft could not be written (${String(e.message || e).slice(0, 120)}). Use Review now in the panel.` });
+      throw e;
+    }
+    return { level: record.level, drafted: true };
+  }
+  return { level: record.level, requested: false };
 }
 
 async function incident(job, settings, profile) {
@@ -272,6 +295,15 @@ export async function runJob(body) {
       const issue = await readIssue(body.id);
       if (!issue || isEvalPlan(issue)) return unindex(`i${body.id}`);
       return indexDocs([issueDoc(issue, scope, settings)]);
+    }
+    case 'index-issues': {
+      const docs = [];
+      for (const id of body.ids || []) {
+        const issue = await readIssue(id);
+        if (!issue || isEvalPlan(issue)) await unindex(`i${id}`);
+        else docs.push(issueDoc(issue, scope, settings));
+      }
+      return docs.length ? indexDocs(docs) : null;
     }
     case 'index-page': {
       const res = await appClient().confluence(route`/wiki/api/v2/pages/${body.id}?body-format=storage`);

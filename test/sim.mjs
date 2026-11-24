@@ -160,11 +160,22 @@ sectionStart('4. save-review: citation check, majority vote, computed severity')
   const c = site.comments.filter((x) => x.issue === plan.key).pop();
   check('high severity mentions the plan owner in the comment', c && c.text.includes('"type":"mention"') && c.text.includes('u1'), c);
   check('the comment is a coloured panel with a table of objections and severity labels', c.text.includes('"type":"panel"') && c.text.includes('"panelType":"error"') && c.text.includes('"type":"table"') && c.text.includes('"text":"HIGH"'));
-  check('the comment says the gate is advisory while in To Do', c.text.includes('Advisory'));
+  check('the comment says the objections must be answered before the plan can start', c.text.includes('must be answered in the Skeptic panel before this plan can start'));
 
   const evH = await app.findEvidence({ planKey: honest.key, searchTerms: 'colour scheme, dark mode, night' }, { accountId: 'u1' });
   const noObj = { summary: '', assumptions: [{ id: 'A1', text: 'Drivers want darker screens at night' }], objections: [] };
-  const savedH = await app.saveReview({ planKey: honest.key, runsJson: JSON.stringify([noObj, noObj, noObj]) }, { accountId: 'u1' });
+  // As the agent saves now: check-review takes the passes (no approval card), save-review takes one plain sentence.
+  const early = await app.saveReview({ planKey: honest.key, summary: 'No objections' }, { accountId: 'u1' });
+  check('save-review without check-review first asks for it', /check-review/.test(early.error || ''), early);
+  const checked = await app.checkReview({ planKey: honest.key, runsJson: JSON.stringify([noObj, noObj, noObj]) }, { accountId: 'u1' });
+  check('check-review holds the passes and says what to call next, in plain words', checked.ok === true && checked.passes === 3 && /save-review/.test(checked.next), checked);
+  const other = await app.saveReview({ planKey: honest.key, summary: 'No objections' }, { accountId: 'u2' });
+  check('nobody else can save the passes someone checked', !!other.error, other);
+  const savedH = await app.saveReview({ planKey: honest.key, summary: 'No objections: nothing in the history contradicts the plan' }, { accountId: 'u1' });
+  check('save-review with only a plain sentence saves the checked review', savedH.verdict === 'no strong objections' && !KVS.get(`staged:${honest.id}`), savedH);
+  const manifest = (await import('node:fs')).readFileSync(new URL('../manifest.yml', import.meta.url), 'utf8');
+  const block = (key) => manifest.slice(manifest.indexOf(`- key: ${key}`), manifest.indexOf('- key:', manifest.indexOf(`- key: ${key}`) + 5));
+  check('the approval card shows no JSON: save-review takes no JSON input, and the JSON goes through a read action', !/runsJson/.test(block('save-review')) && /actionVerb: GET/.test(block('check-review')) && /runsJson/.test(block('check-review')));
   const rh = KVS.get(`review:${honest.id}`);
   check('honesty plan: no objections, honest verdict', savedH.verdict === 'no strong objections' && rh.objections.length === 0, savedH);
   check('honesty plan: says what was checked', /Checked|Searched/.test(rh.summary) && rh.checked.rules.length >= 3, rh.summary);
@@ -269,8 +280,11 @@ sectionStart('7. Layered gate: grading, rebuttal, escalation, approvals, proof')
   await R('reopen', { id: P.id }, ctx);
   r = await R('respond', { id: P.id, type: 'covered', input: { quote: 'We hired a night shift of ten agents' } }, ctx);
   check('covered: a quote that is not in the plan is refused', r.result.ok === false && /can't find/.test(r.result.rebuttal));
+  const pitch = String(plan.fields.description.content[0].content[0].text).split(/(?<=\.)\s+/).find((x) => /live chat/i.test(x)) || '';
+  r = await R('respond', { id: P.id, type: 'covered', input: { quote: pitch } }, ctx);
+  check('covered: the plan\'s own pitch, pasted back, does not settle an objection to it', r.result.ok === false && /restates the plan/.test(r.result.rebuttal), [pitch, r.result]);
   r = await R('respond', { id: P.id, type: 'covered', input: { quote: 'Evening support cover from 6 pm to 10 pm is agreed with the support team.' } }, ctx);
-  check('covered: an exact quote resolves it', r.result.status === 'resolved', r.result);
+  check('covered: an exact quote that deals with it resolves it', r.result.status === 'resolved', [r.result, P.claim, P.sourceTitle, P.sourceQuote, P.satisfiedBy]);
   await R('reopen', { id: P.id }, ctx);
   const incident = [...site.issues.values()].find((i) => i.fields.summary.startsWith('Evening chat queue'));
   r = await R('respond', { id: P.id, type: 'evidence', input: { link: incident.key, text: 'That incident is why we now staff evenings: the 6 pm to 10 pm shift started on 1 March.' } }, ctx);

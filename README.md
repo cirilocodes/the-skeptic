@@ -1,3 +1,5 @@
+<img src="brand/skeptic-logo.png" alt="The Skeptic" width="360">
+
 # The Skeptic
 
 **A Rovo agent and Forge app that argues against your plan using your organisation's own history, and holds the plan at the gate until the answers hold up.**
@@ -8,7 +10,7 @@ Every company relearns the same lessons. The live chat that failed because nobod
 
 ## What it does
 
-- **Reviews plans on its own.** When an epic (or any epic-level plan type) is created or its text changes, a free, deterministic radar checks it against an index of the organisation's history. If it finds evidence-backed concerns, Jira automation runs the Skeptic three times, independently, in the background. The review appears in the issue panel with live progress.
+- **Reviews plans on its own.** When an epic (or any epic-level plan type) is created or its text changes, a free, deterministic radar checks it against an index of the organisation's history. If it finds evidence-backed concerns, the Skeptic writes a cited draft review straight away, with no AI and nothing to set up. **Review now** in the panel turns it into a full AI review in Rovo chat. One switch, on the dashboard or the settings page, turns background reviews on or off.
 - **Cites everything.** Each objection quotes one past plan, incident, risk, Confluence page or earlier Skeptic verdict. Code drops any objection whose source was not in the evidence, whose claim does not match its source, or whose numbers the source does not contain.
 - **Severity is computed, not guessed.** The agent scores impact, likelihood, reversibility and existing mitigation. Code combines those with the age of the evidence and what the Skeptic has learned, and rates each objection low, medium, high or critical.
 - **Three independent passes, majority vote.** An objection survives only if most passes raise it. A lone objection becomes a "worth asking" question instead.
@@ -19,12 +21,15 @@ Every company relearns the same lessons. The live chat that failed because nobod
   - **Medium:** proof is needed: linked evidence, a mitigation task with an owner and due date, a plan change, or the sentence in the plan that already covers it.
   - **High and critical:** accepting the risk needs sign-off from a named approver who is not the plan's author.
 
-  A Jira workflow validator enforces all of this, so nobody can drag the plan past it. The gate is advisory while the plan is in To Do and binding when it starts.
+  A plan cannot start until someone has asked for a full review (a draft from history is not enough) and its serious
+  objections are answered. The Skeptic enforces this itself, with no workflow changes: a plan moved out of To Do too early
+  is moved straight back, with a comment saying what is missing. The optional workflow validator blocks the move before it
+  happens.
 - **A risk ledger that remembers.** It records who accepted which risk, when, and who signed it off. When a new incident matches an accepted risk, the Skeptic flags it, and its track record learns from it.
 - **Never an empty panel.** Code picks the strongest precedents and the sentence in each that says why it ended. The agent gets them as candidates to confirm or reject. With no AI at all, the same candidates make a labelled draft review in seconds: on the 40-plan evaluation set, drafts alone reach about 89% precision and 94% recall. If an automation run never replies, a draft is saved instead of a spinner.
 - **Seen where people look.** A status line in the work item sidebar ("2 blocking · 3 open"), a live open count on the Confluence byline, one-click answers on every objection card, the source's own words under each claim, comments laid out as a coloured panel with a table, and a gate message that names what blocks the plan.
 - **Works on any site.** It detects plan and incident issue types (including Jira Service Management's), works without Confluence, and is honest on near-empty sites. Synonyms link different words for the same idea ("on premise" and "self-hosted"), and text in any language is indexed. It re-reviews only the sections that changed. The tests run a second, differently shaped site to prove it.
-- **Easy to set up and to trust.** A setup checklist, a fast automation setup (one agent step and one web request), a health tab with the last errors, job retries and review timings, "Measure precision" from the admin page, and a nightly index check.
+- **Easy to set up and to trust.** Background reviews work out of the box with one on/off switch. A setup checklist, an optional automation rule for full AI reviews without chat, a health tab with the last errors, job retries and review timings, "Measure precision" from the admin page, and a nightly index check.
 - **Private by design.** Evidence is always re-read with the asking person's permissions, and every review is re-checked against the viewer's: an objection citing an item you can't see is shown redacted, keeping its severity. Background comments give counts only, and review comments name sources only within the plan's own project. All AI runs through Rovo; nothing leaves Atlassian.
 - **Ready for coding agents.** The Skeptic's MCP tools include `gate-status` ("can this plan start?") and `respond-to-objection`.
 
@@ -52,10 +57,11 @@ Every company relearns the same lessons. The live chat that failed because nobod
    | **Sunfield Energy** (`SE`) | pay-as-you-go solar; Initiatives, Incidents, no Confluence | Let customers pay their monthly bill with airtime | Solar water pumps for farmers | Referral bonus for customers who bring a neighbour |
 
    All five can sit on one site: each plan is argued against only with its own company's history.
-3. **Review a plan.** Open a demo plan and the **Skeptic** panel. **Review now** asks the Skeptic agent in Rovo chat;
-   **Quick draft from history** needs no AI. Answer an objection, then try moving the plan to In Progress.
-4. **Optional:** background reviews with the automation rule in [`automation/`](automation/), and the workflow validator
-   *Skeptic objections resolved* on the transition out of To Do.
+3. **Review a plan.** Open a demo plan and the **Skeptic** panel. The plans that history argues against already have a
+   cited draft review, written in the background. **Review now** asks the Skeptic agent in Rovo chat for the full review.
+   Answer an objection, then try moving the plan to In Progress.
+4. **Optional:** the workflow validator *Skeptic objections resolved* on the transition out of To Do, and full AI
+   reviews without chat through the automation rule in [`automation/`](automation/).
 
 Rovo must be on for the site to use the agent. Everything else, including drafts, the gate and the dashboard, works
 without it.
@@ -64,7 +70,7 @@ without it.
 
 ```
 npm install
-npm test          # 574 checks in six suites, no Atlassian site needed
+npm test          # 632 checks in six suites, no Atlassian site needed
 forge deploy
 forge install --upgrade   # Jira, then Confluence
 ```

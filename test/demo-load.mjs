@@ -20,6 +20,7 @@ const app = await import('./.bundle.mjs');
 const Q = globalThis.__queue;
 Q.handler = app.jobs;
 const KVS = globalThis.__kvs;
+const STATUS = (id) => `demo:status:${id}`;
 
 let passed = 0;
 let failed = 0;
@@ -106,6 +107,12 @@ section(`3. Load ${kestrel.company.name}`);
   await settle();
   const st2 = (await R('getDemo', {}, ADMIN)).kestrel;
   check('loading again creates nothing twice', st2.created === 0 && st2.existing === kf.length && inProject('KF').length === kf.length, [again.message, st2]);
+  const lost = kf.find((i) => i.fields.summary === 'Drone delivery pilot');
+  lost.fields.status = { name: 'To Do', statusCategory: { key: 'new' } };
+  const commentsBefore = site.comments.length;
+  await R('loadDemo', { company: 'kestrel', projectKey: 'KF', spaceKey: 'KF' }, ADMIN);
+  await settle();
+  check('loading again repairs an item left in the wrong status, without repeating comments', lost.fields.status.statusCategory.key === 'done' && site.comments.length === commentsBefore, [lost.fields.status, site.comments.length - commentsBefore]);
   const noSpace = await R('loadDemo', { company: 'kestrel', projectKey: 'KF', spaceKey: 'ZZ' }, ADMIN);
   check('a missing space is reported, not fatal', /no Confluence space ZZ/.test(noSpace.message));
   await settle();
@@ -147,9 +154,13 @@ await app.jobs({ body: { type: 'index-page', id: record.id } });
 for (const d of COMPANIES)
   for (const p of d.plans) {
     const key = status[d.company.id].plans[p.key];
+    const label = `${d.company.name}, "${p.summary}"`;
+    // Background reviews are on by default with no automation rule: a flagged plan already has a draft.
+    const auto = KVS.get(`review:${site.byKey.get(key).id}`);
+    if (p.expect === 'none') check(`${label}: no background review, as nothing argues against it`, !auto, auto && sourcesOf(auto));
+    else check(`${label}: a cited draft review was written in the background, with nobody asking`, !!auto && auto.draft && auto.objections.length >= 1 && sourcesOf(auto).every((s) => named(s, p.sources)), auto && { srcs: sourcesOf(auto), draft: auto.draft });
     const v = await R('draftReview', {}, ctxFor(key));
     const srcs = sourcesOf(v.review);
-    const label = `${d.company.name}, "${p.summary}"`;
     if (p.expect === 'several') {
       check(`${label}: several history items argue against it`, srcs.length >= 2 && srcs.filter((s) => named(s, p.sources)).length >= 2, { srcs, dropped: v.review.dropReasons });
       check(`${label}: every item cited is one it should be`, srcs.every((s) => named(s, p.sources)), srcs);
@@ -167,6 +178,38 @@ for (const d of COMPANIES)
   check('a decision record the Skeptic wrote for another plan is never offered as evidence', !(onprem.confluencePages || []).some((p) => /^Decision: KF-/.test(p.title)), (onprem.confluencePages || []).map((p) => p.title));
   const own = await app.findEvidence({ planKey: status.kestrel.plans.livechat }, { accountId: 'u1' });
   check('...nor for the plan it was written for, so the Skeptic never quotes itself', !(own.confluencePages || []).some((p) => /^Decision: KF-/.test(p.title)), (own.confluencePages || []).map((p) => p.title));
+}
+
+section('5b. One switch for background reviews, on the dashboard');
+{
+  const DASH = { accountId: 'u4', moduleKey: 'skeptic-dashboard' };
+  site.me = 'u1';
+  check('someone who is not a Jira admin cannot flip it', /Only a Jira admin/.test((await fails(() => R('setBackground', { on: false }, { accountId: 'u1', moduleKey: 'skeptic-dashboard' }))) || ''));
+  check('...and sees no switch on the dashboard', (await R('getInsights', {}, { accountId: 'u1', moduleKey: 'skeptic-dashboard' })).canAdmin === false);
+  site.me = 'u4';
+  check('a Jira admin sees the switch, on by default, in draft mode (no automation rule)', await R('getInsights', {}, DASH).then((d) => d.canAdmin === true && d.background === true && d.backgroundMode === 'draft'));
+  const st = await R('getDemo', {}, ADMIN);
+  const tablets = site.byKey.get(st.harbourvine.plans.tablets);
+  const pumps = site.byKey.get(st.sunfield.plans.pumps);
+  const off = await R('setBackground', { on: false }, DASH);
+  check('switched off', off.background === false && KVS.get('config:settings').autoReview === false);
+  // Two flagged plans lose their reviews (as on a site where the plans were flagged before the switch).
+  for (const i of [tablets, pumps]) {
+    KVS.delete(`review:${i.id}`);
+    KVS.set(`radar:${i.id}`, { ...KVS.get(`radar:${i.id}`), reviewed: false });
+  }
+  await app.jobs({ body: { type: 'prep', id: tablets.id, reason: 'edited', owner: 'u4' } });
+  check('while it is off, a flagged plan gets no review by itself', !KVS.get(`review:${tablets.id}`) && KVS.get(`radar:${tablets.id}`)?.level === 'high', KVS.get(`radar:${tablets.id}`)?.level);
+  const on = await R('setBackground', { on: true }, DASH);
+  await settle();
+  check('switching it on drafts every flagged plan that has no review yet', on.background === true && !!KVS.get(`review:${tablets.id}`)?.draft && !!KVS.get(`review:${pumps.id}`)?.draft, [!!KVS.get(`review:${tablets.id}`), !!KVS.get(`review:${pumps.id}`)]);
+  check('...citing only the right history', sourcesOf(KVS.get(`review:${tablets.id}`)).every((s) => named(s, harbourvine.plans.find((p) => p.key === 'tablets').sources)), sourcesOf(KVS.get(`review:${tablets.id}`)));
+  const dash = await R('getInsights', {}, DASH);
+  check('the dashboard lists plans with only a draft as waiting for a full review, not as waiting on answers', dash.needsFullReview.some((x) => x.key === tablets.key) && !dash.gated.some((x) => x.key === tablets.key), { needs: dash.needsFullReview.map((x) => x.key), gated: dash.gated.map((x) => x.key) });
+  check('the review time counts full reviews only; drafts are timed on their own', dash.timing.draftSamples >= 1 && dash.timing.readySamples === 0, dash.timing);
+  const said = site.comments.filter((c) => c.issue === tablets.key).map((c) => c.text).join(' ');
+  check('the draft comment says a full review is needed before the plan can start', /Before the plan can start, choose Full review in Rovo chat/.test(said) && !/Nothing here stops/.test(said));
+  site.me = 'u1';
 }
 
 section(`6. ${pinecrest.company.name}: matching in different words`);
@@ -224,6 +267,32 @@ section('9. A site that does not allow unassigned work');
   const st = (await R('getDemo', {}, ADMIN)).sunfield;
   const se = [...strict.issues.values()].filter((i) => i.fields.project.key === 'SE');
   check('the load falls back to the default assignee and still creates every item', st.state === 'done' && se.length === itemCount(sunfield), { state: st.state, error: st.error, have: se.length });
+}
+
+section('10. Several loads asked for at once run one company at a time, in small batches');
+{
+  const busy = createSite({ history: false, plans: false, extraTypes: [{ id: '10009', name: 'Incident', hierarchyLevel: 0 }, { id: '10010', name: 'Initiative', hierarchyLevel: 1 }] });
+  busy.extraProjects = ['HV', 'BL'];
+  busy.spaces = ['HV', 'BL'];
+  globalThis.__sim.respond = (...a) => busy.respond(...a);
+  const before = Q.pushed.length;
+  // Harbour & Vine is mid-load (on Forge, jobs run side by side) when Brightwell is asked for.
+  await R('loadDemo', { company: 'harbourvine', projectKey: 'HV', spaceKey: 'HV' }, ADMIN);
+  const hvJob = Q.pending.splice(0);
+  KVS.set(STATUS('harbourvine'), { ...KVS.get(STATUS('harbourvine')), step: 'Creating work items', updatedAt: new Date().toISOString() });
+  await R('loadDemo', { company: 'brightwell', projectKey: 'BL', spaceKey: 'BL' }, ADMIN);
+  await Q.drain(20000);
+  const waiting = (await R('getDemo', {}, ADMIN)).brightwell;
+  check('the second load waits for the first, and says so', waiting.state === 'running' && /Waiting for Harbour & Vine to finish loading/.test(waiting.step || ''), waiting);
+  Q.pending.push(...hvJob);
+  for (let i = 0; i < 4; i += 1) await settle();
+  const both = await R('getDemo', {}, ADMIN);
+  check('then both finish', both.harbourvine.state === 'done' && both.brightwell.state === 'done', [both.harbourvine.state, both.brightwell.state, both.brightwell.step]);
+  const jobs = Q.pushed.slice(before).map((e) => e.body);
+  const finishes = jobs.filter((b) => b.type === 'demo-finish');
+  check('follow-ups go ten items to a job, not one job per item', finishes.length > 0 && finishes.every((b) => (b.items || []).length <= 10) && finishes.length <= Math.ceil((itemCount(harbourvine) + itemCount(brightwell)) / 10) + 2, finishes.length);
+  check('and each batch is indexed in one job', jobs.filter((b) => b.type === 'index-issues').length === finishes.length && !jobs.some((b) => b.type === 'index-issue'));
+  globalThis.__sim.respond = (...a) => site.respond(...a);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -41,11 +41,11 @@ modules:
           required: false
           description: Comma-separated keywords and synonyms for the plan's core idea, e.g. "live chat, messaging, chat support".
 
-    - key: save-review
-      name: Save the Skeptic review
-      function: saveReview
-      actionVerb: CREATE
-      description: Saves the review after find-evidence. Pass up to three independent passes in runsJson; code verifies citations, votes across passes and computes severity.
+    - key: check-review
+      name: Check the Skeptic review
+      function: checkReview
+      actionVerb: GET
+      description: Step 1 of saving, after find-evidence. Pass the three independent passes in runsJson; the app checks them and holds them for save-review.
       inputs:
         planKey:
           title: Work item key
@@ -58,10 +58,32 @@ modules:
           required: false
           description: The numeric ID of the Confluence page, when reviewing a page. Digits only; never put a Jira key here (use planKey).
         runsJson:
-          title: Review passes as JSON
+          title: Review passes
           type: string
           required: true
           description: 'JSON array of one to three passes: {summary, assumptions:[{id,text,section}], objections:[{assumption,ref,claim,strength,impact,likelihood,reversibility,mitigation,planAlreadyHandles,talkTo,satisfiedBy}], questions, revisitWhen}.'
+
+    - key: save-review
+      name: Save the Skeptic review
+      function: saveReview
+      actionVerb: CREATE
+      description: Step 2 of saving, after check-review. Saves the checked review; code verifies citations, votes across passes and computes severity. Takes no JSON.
+      inputs:
+        planKey:
+          title: Work item key
+          type: string
+          required: false
+          description: The Jira key of the plan. Leave empty for a Confluence page or to use the current work item.
+        pageId:
+          title: Confluence page ID
+          type: string
+          required: false
+          description: The numeric ID of the Confluence page, when reviewing a page. Digits only; never put a Jira key here (use planKey).
+        summary:
+          title: What will be saved
+          type: string
+          required: true
+          description: One plain sentence for the person approving, e.g. "4 objections, 3 critical and 1 high, citing DEC-07 and HV-4". Never JSON, code or braces.
 
     - key: get-review
       name: Get the current Skeptic review
@@ -294,6 +316,8 @@ modules:
   function:
     - key: findEvidence
       handler: index.findEvidence
+    - key: checkReview
+      handler: index.checkReview
     - key: saveReview
       handler: index.saveReview
     - key: getReviewAction

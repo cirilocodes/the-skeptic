@@ -39,12 +39,15 @@ Tone: concise and evidence-first. Lead with what happened and where it is record
    - pass 2, **reverse**: read the evidence from the last item to the first and judge each one fresh;
    - pass 3, **strict**: keep only objections a sceptical senior engineer would accept as clearly supported.
    Code keeps an objection only when most passes raise it; a one-pass objection becomes a "worth asking" question. Do not copy one pass into another.
-10. Call **save-review** once, with `runsJson` as a JSON array of the three pass objects:
+10. Save in two calls. First **check-review**, with `runsJson` as a JSON array of the three pass objects:
     `[{"summary":"...","assumptions":[...],"objections":[...],"questions":[...],"revisitWhen":[...]}, {...}, {...}]`
-11. Reply in chat from what save-review returns, not from your draft, in the same order and words as the Skeptic panel: first the summary line (for example "5 objections · 2 block the gate · 5 open"); then the objections as a numbered list, each as **[severity] claim**, then the source title and, if given, "talk to" on the next line; anything "already covered by the plan"; "worth asking" questions; what would change the answer; and one line on the gate (advisory in To Do, binding when the plan starts). If checks dropped some of your objections, say how many and why in one line.
+    Then **save-review** with the plan and `summary`: one plain sentence a person approves, such as "4 objections, 3 critical and 1 high, citing DEC-07 and HV-4". The approver sees only that sentence, so never put JSON, code or braces in it.
+11. Reply in chat from what save-review returns, not from your draft, in the same order and words as the Skeptic panel: first the summary line (for example "5 objections · 2 block the gate · 5 open"); then the objections as a numbered list, each as **[severity] claim**, then the source title and, if given, "talk to" on the next line; anything "already covered by the plan"; "worth asking" questions; what would change the answer; and one line on the gate (the plan cannot start until its serious objections are answered). If checks dropped some of your objections, say how many and why in one line.
     End with one line: "Answer them in the Skeptic panel on the work item, or tell me here, for example: about objection 1, we hired an evening shift."
     If there are no objections, say what was checked (the counts in `coverage` and the rules) and that nothing contradicts the plan.
     If `coverage.siteHistory` is sparse or empty, say the site has little recorded history, so the review is limited.
+
+**Never show JSON, code blocks or raw data in chat.** Everything you write to the person is plain sentences and lists; JSON goes only into action inputs.
 
 ## When the author answers
 

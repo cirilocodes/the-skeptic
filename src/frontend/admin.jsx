@@ -34,6 +34,7 @@ import ForgeReconciler, {
   xcss,
 } from '@forge/react';
 import { invoke } from '@forge/bridge';
+import { Brand } from './shared';
 
 const card = xcss({
   borderColor: 'color.border',
@@ -298,6 +299,7 @@ function DemoData({ data, busy, run, setData, setMsg }) {
 }
 
 function App() {
+  const [showRule, setShowRule] = useState(false);
   const [data, setData] = useState(null);
   const [draft, setDraft] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -342,6 +344,8 @@ function App() {
     run('saveAdmin', { ...draft, freezeWindows: draft.freezeText }, (r) => {
       setDraft({ ...r.settings, freezeText: (r.settings.freezeWindows || []).map((w) => `${w.name}: ${w.start} to ${w.end}`).join('\n') });
       setMsg(['Settings saved.', ...(r.warnings || [])].join(' '));
+      // The checklist and status lines read the settings: refresh them.
+      invoke('getAdmin').then((d) => setData(d)).catch(() => {});
     });
   const typeOptions = (data.profile?.issueTypes || []).map((t) => ({ label: t.name, value: t.name }));
   const p = data.profile || {};
@@ -357,6 +361,7 @@ function App() {
 
   return (
     <Stack space="space.200">
+      <Brand />
       {msg ? (
         <SectionMessage appearance="success">
           <Text>{msg}</Text>
@@ -376,7 +381,7 @@ function App() {
           </Text>
           <Lozenge appearance={p.density === 'normal' ? 'success' : 'moved'}>{`history: ${p.density || 'unknown'}`}</Lozenge>
           <Lozenge appearance={idx.state === 'ready' ? 'success' : 'inprogress'}>{`index: ${idx.state || 'empty'} (${idx.docs || 0})`}</Lozenge>
-          <Lozenge appearance={draft.automationReady ? 'success' : 'default'}>{draft.automationReady ? 'background reviews on' : 'background reviews off'}</Lozenge>
+          <Lozenge appearance={data.settings.autoReview ? 'success' : 'default'}>{data.settings.autoReview ? 'background reviews on' : 'background reviews off'}</Lozenge>
         </Inline>
       </Box>
 
@@ -396,9 +401,38 @@ function App() {
         <TabPanel>
           <Stack space="space.200">
             <Text>
-              The radar checks every new or edited plan for free. When it finds evidence-backed concerns, it asks an automation rule for a full
-              review, so nobody has to open chat. Set the rule up once; it takes about five minutes.
+              The radar checks every new or edited plan for free. When it finds evidence-backed concerns, the Skeptic writes a draft review citing that
+              history straight away: no AI, no cost, nothing to set up. Review now in the panel opens Rovo chat with the request filled in, for the full
+              AI review.
             </Text>
+            <Setting
+              id="auto"
+              label="Background reviews"
+              help={data.settings.autoReview ? 'On. Flagged plans get a cited draft review as soon as they are created or edited.' : 'Off. Plans are only reviewed when someone asks.'}
+              checked={!!data.settings.autoReview}
+              onChange={(v) => {
+                // The one switch: saved at once (other unsaved edits stay as drafts).
+                set('autoReview')(v);
+                run('saveAdmin', { autoReview: v }, (r) => {
+                  setData({ ...data, settings: r.settings });
+                  setMsg(v ? 'Background reviews are on.' : 'Background reviews are off.');
+                  invoke('getAdmin').then((d) => setData(d)).catch(() => {});
+                });
+              }}
+            />
+            <Setting id="demo" label="Guided tour in the panel" help="Show a step-by-step banner on each plan: review, answer, record the decision, move on. Useful for demos and first weeks." checked={draft.demoMode} onChange={set('demoMode')} />
+            <Inline space="space.100" alignBlock="center" shouldWrap>
+              <Heading size="xsmall">Optional: full AI reviews without opening chat</Heading>
+              <Button appearance="subtle" spacing="compact" onClick={() => setShowRule(!showRule)}>
+                {showRule ? 'Hide the steps' : 'Show the steps'}
+              </Button>
+            </Inline>
+            <Text>
+              Atlassian only lets a Rovo agent run in the background from a Jira automation rule, and an app cannot create the rule for you. Skip this
+              unless you want full AI reviews to arrive with nobody opening chat; it takes about five minutes.
+            </Text>
+            {showRule || draft.automationReady ? (
+            <Stack space="space.200">
             <Choose
               id="mode"
               label="Setup"
@@ -472,8 +506,7 @@ function App() {
                 </SectionMessage>
               ) : null;
             })()}
-            <Setting id="ready" label="The automation rule is set up" help="Background reviews start on their own, and the panel's Review now button runs one without opening chat." checked={draft.automationReady} onChange={set('automationReady')} />
-            <Setting id="auto" label="Review plans in the background" help="Ask for a full review when a plan is created or its text changes, if the radar found evidence-backed concerns." checked={draft.autoReview} onChange={set('autoReview')} />
+            <Setting id="ready" label="The automation rule is set up" help="Flagged plans get a full AI review from the rule instead of a draft, and the panel's Review now button runs one without opening chat." checked={draft.automationReady} onChange={set('automationReady')} />
             {draft.setupMode === 'thorough' ? (
             <Choose
               id="runs"
@@ -485,7 +518,8 @@ function App() {
             />
             ) : null}
             <Setting id="draftFallback" label="Draft from history if no reply arrives" help="If the agent has not replied after 15 minutes, write a labelled draft from the strongest precedents (no AI) instead of showing nothing." checked={draft.draftFallback} onChange={set('draftFallback')} />
-            <Setting id="demo" label="Guided tour in the panel" help="Show a step-by-step banner on each plan: review, answer, record the decision, move on. Useful for demos and first weeks." checked={draft.demoMode} onChange={set('demoMode')} />
+            </Stack>
+            ) : null}
             {SaveBar}
           </Stack>
         </TabPanel>
@@ -510,10 +544,15 @@ function App() {
             <Text>
               Severity decides what an objection needs: <Strong>low</Strong> any answer that passes the check; <Strong>medium</Strong> proof, and accepting the risk
               needs a mitigation task; <Strong>high</Strong> and <Strong>critical</Strong> also need a named approver for "not relevant" or "accept the risk".
-              Add the validator <Em>Skeptic objections resolved</Em> to the transition out of To Do in your workflow.
+              The Skeptic enforces the gate itself: a plan moved out of To Do too early is moved straight back, with a comment saying what is missing.
+              For a clean block at the moment of the move, also add the validator <Em>Skeptic objections resolved</Em> to the transition out of To Do.
             </Text>
+            <Setting id="full" label="A plan needs a full review before it can start" help="Someone must choose Review now. A draft written from history is a head start, not a review." checked={draft.requireFullReview} onChange={set('requireFullReview')} />
+            <Setting id="guard" label="Move a plan back if it starts too early" help="Works with no workflow changes. The validator, if added, stops the move before it happens." checked={draft.enforceGate} onChange={set('enforceGate')} />
             <Choose id="min" label="Objections that block the gate" help="At or above this severity. Lower ones are shown but never block." options={SEVERITIES} value={draft.gateMinSeverity} onChange={set('gateMinSeverity')} />
-            <Setting id="require" label="Require a review when the radar says high" help="Hold a high-radar plan in To Do until a review exists." checked={draft.requireReviewOnHigh} onChange={set('requireReviewOnHigh')} />
+            {draft.requireFullReview ? null : (
+              <Setting id="require" label="Require a review when the radar says high" help="Hold a high-radar plan in To Do until a review exists." checked={draft.requireReviewOnHigh} onChange={set('requireReviewOnHigh')} />
+            )}
             <Stack space="space.075">
               <Text>
                 <Strong>Approvers for high and critical risks</Strong>

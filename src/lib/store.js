@@ -246,5 +246,5 @@ export async function batchGet(keys) {
 
 export async function deleteAllFor(issueId) {
   const tk = String(issueId);
-  await batchDelete([k.review(tk), k.evidence(tk), k.prep(tk), k.outcome(tk), k.radar(tk), k.progress(tk), k.runs(tk)]);
+  await batchDelete([k.review(tk), k.evidence(tk), k.prep(tk), k.outcome(tk), k.radar(tk), k.progress(tk), k.runs(tk), `staged:${tk}`]);
 }

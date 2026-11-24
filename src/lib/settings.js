@@ -36,6 +36,8 @@ export const DEFAULTS = {
   // Gate
   gateMinSeverity: 'medium', // objections below this are shown but never block
   requireReviewOnHigh: true, // block a plan the radar rates "high" until a review exists
+  requireFullReview: true, // a plan cannot start until it has a full review (a draft from history is not enough)
+  enforceGate: true, // move a plan back to To Do if it starts before the gate is clear (works without the validator)
   approvers: [], // account IDs allowed to sign off high/critical risk acceptance; empty = anyone except the author
   backupApprover: '', // account ID asked when the named approver has not answered
   reminderHours: 24,
@@ -107,6 +109,8 @@ const CLEAN = {
   overloadThreshold: (v) => int(v, 0, 500, 15),
   gateMinSeverity: (v) => sev(v, 'medium'),
   requireReviewOnHigh: Boolean,
+  requireFullReview: Boolean,
+  enforceGate: Boolean,
   approvers: (v) => idList(v),
   backupApprover: (v) => idList([v], 1)[0] || '',
   reminderHours: (v) => int(v, 1, 240, 24),

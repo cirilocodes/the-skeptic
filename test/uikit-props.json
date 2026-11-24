@@ -529,5 +529,12 @@
   "showBorder",
   "colorPalette",
   "hideMenu"
+ ],
+ "Image": [
+  "alt",
+  "src",
+  "size",
+  "width",
+  "height"
  ]
 }

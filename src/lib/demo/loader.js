@@ -89,11 +89,11 @@ async function existingDemoItems(c, projectKey) {
         method: 'POST',
         headers: JSON_HEADERS,
         // kf-seed: items created by the seed script, so loading after seeding creates nothing twice.
-        body: JSON.stringify({ jql: `project = "${projectKey}" AND labels in (${DEMO_LABEL}, kf-seed)`, fields: ['summary'], maxResults: 100, ...(token ? { nextPageToken: token } : {}) }),
+        body: JSON.stringify({ jql: `project = "${projectKey}" AND labels in (${DEMO_LABEL}, kf-seed)`, fields: ['summary', 'status'], maxResults: 100, ...(token ? { nextPageToken: token } : {}) }),
       }),
       'existing demo items',
     );
-    for (const x of data.issues || []) out.set(x.fields.summary, { id: String(x.id), key: x.key });
+    for (const x of data.issues || []) out.set(x.fields.summary, { id: String(x.id), key: x.key, category: x.fields.status?.statusCategory?.key || null });
     token = data.nextPageToken;
     if (!token) break;
   }
@@ -162,10 +162,32 @@ async function createItems(c, projectKey, list, known) {
   }
 }
 
+// Loads run one company at a time: several at once, on a new install that is also building its index,
+// exceed Forge's per-installation limits. A load waits while another is actively loading, or while one
+// that was asked for earlier is still waiting. Statuses older than 30 minutes are ignored.
+const ACTIVE_MS = 30 * 60 * 1000;
+export async function aheadOf(company) {
+  const all = await getDemoStatus();
+  const mine = all[company];
+  const fresh = (s) => s?.state === 'running' && Date.now() - Date.parse(s.updatedAt || s.startedAt || 0) < ACTIVE_MS;
+  const waiting = (s) => s.step === 'Queued' || String(s.step || '').startsWith('Waiting');
+  for (const [id, s] of Object.entries(all)) {
+    if (id === company || !fresh(s)) continue;
+    if (!waiting(s)) return id;
+    if (Date.parse(s.startedAt || 0) < Date.parse(mine?.startedAt || 0)) return id;
+  }
+  return null;
+}
+
 // Job 1: create what is missing, then queue the follow-ups.
 export async function demoLoad(job, { enqueue, enqueueMany }) {
   const data = DEMOS[job.company];
   if (!data) return null;
+  const busy = await aheadOf(job.company);
+  if (busy && (job.waits || 0) < 30) {
+    await setDemoStatus(job.company, { state: 'running', step: `Waiting for ${DEMOS[busy].company.name} to finish loading` });
+    return enqueue({ ...job, waits: (job.waits || 0) + 1 }, 60);
+  }
   const c = appClient();
   await setDemoStatus(job.company, { state: 'running', step: 'Creating work items' });
   const meta = await json(await c.jira(route`/rest/api/3/issue/createmeta/${job.projectKey}/issuetypes`), 'project issue types');
@@ -178,9 +200,16 @@ export async function demoLoad(job, { enqueue, enqueueMany }) {
   await createItems(c, job.projectKey, missing.filter((x) => !x.parent), known);
   await createItems(c, job.projectKey, missing.filter((x) => x.parent), known);
   // Follow-ups for the new items: status, comment and indexing.
-  const follow = items
-    .filter((x) => known.get(x.summary)?.fresh)
-    .map((x) => ({ type: 'demo-finish', company: job.company, id: known.get(x.summary).id, to: x.to, comment: x.comment }));
+  // Ten items per job, each batch then indexed in one job, to stay well inside Forge's invocation limits.
+  const fresh = items.filter((x) => known.get(x.summary)?.fresh).map((x) => ({ id: known.get(x.summary).id, to: x.to, comment: x.comment }));
+  // Loading again also repairs: an existing item left in the wrong status (a step lost earlier) is moved.
+  // Its comment is not added again.
+  const stray = items
+    .filter((x) => x.to && !known.get(x.summary)?.fresh && known.get(x.summary)?.category && known.get(x.summary).category !== x.to)
+    .map((x) => ({ id: known.get(x.summary).id, to: x.to }));
+  fresh.push(...stray);
+  const follow = [];
+  for (let i = 0; i < fresh.length; i += 10) follow.push({ type: 'demo-finish', company: job.company, items: fresh.slice(i, i + 10) });
   await enqueueMany(follow);
 
   // Pages.
@@ -203,7 +232,9 @@ export async function demoLoad(job, { enqueue, enqueueMany }) {
 
   // The radar on the demo plans, once the history is indexed.
   const plans = Object.fromEntries(data.plans.map((p) => [p.key, known.get(p.summary)]).filter(([, v]) => v));
-  for (const p of Object.values(plans)) await enqueue({ type: 'prep', id: p.id, reason: 'demo', force: true, requestedAt: new Date().toISOString() }, 300);
+  // The admin who loaded the demo stands in as the plans' owner (the app created them), so background
+  // drafts cite only what that admin can see.
+  for (const p of Object.values(plans)) await enqueue({ type: 'prep', id: p.id, reason: 'demo', force: true, owner: job.accountId || null, requestedAt: new Date().toISOString() }, 300);
   return setDemoStatus(job.company, {
     state: 'done',
     step: 'Done',
@@ -215,17 +246,20 @@ export async function demoLoad(job, { enqueue, enqueueMany }) {
   });
 }
 
-// Job 2, one per new item: move it to its status, add its comment, index it.
+// Job 2, one per batch of new items: move each to its status, add its comment, then index the batch.
 export async function demoFinish(job, { enqueue }) {
   const c = appClient();
-  if (job.to) {
-    const t = await json(await c.jira(route`/rest/api/3/issue/${job.id}/transitions`), 'transitions');
-    const pick = (t.transitions || []).find((x) => x.to?.statusCategory?.key === job.to);
-    if (pick)
-      await c.jira(route`/rest/api/3/issue/${job.id}/transitions`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ transition: { id: pick.id } }) });
+  const items = job.items || [{ id: job.id, to: job.to, comment: job.comment }];
+  for (const it of items) {
+    if (it.to) {
+      const t = await json(await c.jira(route`/rest/api/3/issue/${it.id}/transitions`), 'transitions');
+      const pick = (t.transitions || []).find((x) => x.to?.statusCategory?.key === it.to);
+      if (pick)
+        await c.jira(route`/rest/api/3/issue/${it.id}/transitions`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ transition: { id: pick.id } }) });
+    }
+    if (it.comment) await c.jira(route`/rest/api/3/issue/${it.id}/comment`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ body: paragraphsToAdf([it.comment]) }) });
   }
-  if (job.comment) await c.jira(route`/rest/api/3/issue/${job.id}/comment`, { method: 'POST', headers: JSON_HEADERS, body: JSON.stringify({ body: paragraphsToAdf([job.comment]) }) });
-  // The app's own edits don't fire update events (ignoreSelf), so index explicitly.
-  await enqueue({ type: 'index-issue', id: job.id });
-  return { id: job.id };
+  // The app's own edits don't fire update events (ignoreSelf), so index explicitly, all in one job.
+  await enqueue({ type: 'index-issues', ids: items.map((it) => it.id) });
+  return { ids: items.map((it) => it.id) };
 }

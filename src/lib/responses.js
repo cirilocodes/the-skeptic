@@ -18,6 +18,10 @@ import { kvs } from '@forge/kvs';
 import { sevRank } from './settings';
 import { clip, isIsoDate, isoDate, overlap, paragraphsToAdf, quoteFound } from './text';
 
+// Plain lower-case words of three letters or more, without function words, singular ("chats" = "chat").
+const FUNCTION_WORDS = new Set('the and for with from that this was were are has have had not but its our their them they you your all any can will would could should into onto than then there here when what which who whom whose why how also only just very each every some such per via out off over under about after before because since while'.split(' '));
+const plainWords = (t) => new Set((String(t).toLowerCase().match(/[a-z0-9]+/g) || []).filter((w) => w.length >= 3 && !FUNCTION_WORDS.has(w)).map((w) => (w.length > 4 && w.endsWith('s') && !w.endsWith('ss') ? w.slice(0, -1) : w)));
+
 export const RESPONSE_TYPES = {
   evidence: 'Link evidence',
   mitigation: 'Create a mitigation task',
@@ -253,6 +257,18 @@ export async function respond({ review, o, type, input = {}, actor, target, c, s
     const quote = String(input.quote || '').trim();
     if (!quoteFound(quote, `${target.title}\n${target.text}`)) return { ok: false, rebuttal: "I can't find that text in the plan. Copy the sentence exactly." };
     if (overlap(quote, objectionTerms(o)).count < 1) return { ok: false, rebuttal: `That part of the plan doesn't mention ${o.sourceTitle ? `"${o.sourceTitle}"` : 'this risk'}.` };
+    // The plan's own pitch always shares words with an objection to it ("live chat", "support"). A sentence
+    // that answers the objection must name what is distinctive about it: words from the objection, its
+    // source or what would settle it that are not already in the plan's title.
+    const titleWords = plainWords(target.title || '');
+    const distinctive = [...plainWords(`${o.claim || ''} ${o.sourceTitle || ''} ${o.sourceQuote || ''} ${o.satisfiedBy || ''}`)].filter((w) => !titleWords.has(w));
+    const said = plainWords(quote);
+    const hits = distinctive.filter((w) => said.has(w)).length;
+    if (hits < 2)
+      return {
+        ok: false,
+        rebuttal: `That sentence restates the plan rather than answering this objection${o.satisfiedBy ? ` (it would be settled by: ${String(o.satisfiedBy).replace(/[.\s]+$/, '')})` : ''}. Quote the part that deals with it, or choose another answer.`,
+      };
     resolve(o, { type, quote: clip(quote, 400) }, actor);
     await recordSignal({ docId: o.docId }, 'dismissed');
     return { ok: true, status: 'resolved' };

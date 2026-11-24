@@ -86,6 +86,10 @@ section('4. Has anyone here tried this?');
 section('5. The gate works with Initiatives');
 {
   offline.fields.status = { id: '3', name: 'In Progress', statusCategory: { key: 'indeterminate' } };
+  const g0 = await app.gate({ issue: { key: offline.key }, transition: { to: { id: '3' } } });
+  check('with only a draft review, the initiative cannot start until someone asks for the full review', g0.result === false && /only has a draft review/.test(g0.errorMessage), g0);
+  // The full review (from Rovo) arrives, with the same objections:
+  for (const i of [offline, honest]) KVS.set(`review:${i.id}`, { ...KVS.get(`review:${i.id}`), draft: false, channel: 'chat' });
   const g = await app.gate({ issue: { key: offline.key }, transition: { to: { id: '3' } } });
   check('moving the reviewed initiative out of To Do is blocked', g.result === false && /unresolved objection/.test(g.errorMessage), g);
   const g2 = await app.gate({ issue: { key: honest.key }, transition: { to: { id: '3' } } });

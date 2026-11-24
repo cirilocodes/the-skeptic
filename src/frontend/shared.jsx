@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Box,
+  Image,
   Button,
   ButtonGroup,
   DatePicker,
@@ -32,6 +33,7 @@ import {
   xcss,
 } from '@forge/react';
 import { invoke, rovo } from '@forge/bridge';
+import brandLogo from './brand-logo.png';
 
 export const card = xcss({
   borderColor: 'color.border',
@@ -41,6 +43,10 @@ export const card = xcss({
   padding: 'space.150',
 });
 const quiet = xcss({ paddingBlockStart: 'space.050' });
+
+// The logo with the name set in the brand font (Space Grotesk, navy). UI Kit can't load fonts, so the
+// name is part of the image; it sits on its own white card so it reads in light and dark themes.
+export const Brand = () => <Image src={brandLogo} alt="The Skeptic" width={220} height={56} />;
 
 export const SEVERITY_LOOK = { critical: 'removed', high: 'removed', medium: 'moved', low: 'default' };
 export const VERDICT_LOOK = { 'strong objections': 'removed', 'some concerns': 'moved', 'minor points': 'default', 'no strong objections': 'success' };
@@ -451,7 +457,7 @@ function RadarBox({ radar, busy, onRun, density }) {
       <Inline space="space.100" alignBlock="center" shouldWrap>
         <Text>Radar</Text>
         <Lozenge appearance={RADAR_LOOK[radar.level] || 'default'}>{radar.level}</Lozenge>
-        <Text>{radar.found ? `found ${radar.found}` : radar.level === 'low' ? 'found nothing that needs a review' : ''}</Text>
+        <Text>{radar.found ? `found ${radar.found}` : radar.level === 'low' ? 'no warning signs in your history' : ''}</Text>
         <Button appearance="subtle" spacing="compact" isDisabled={busy} onClick={onRun}>
           Re-check
         </Button>
@@ -535,6 +541,8 @@ export function SkepticApp({ kind }) {
   const [overriding, setOverriding] = useState(false);
   const [notice, setNotice] = useState('');
   const polls = useRef(0);
+  // Set when Review now opens Rovo chat: the panel then refreshes itself until the new review lands.
+  const [waitingChat, setWaitingChat] = useState(null);
 
   const load = async () => {
     try {
@@ -547,6 +555,19 @@ export function SkepticApp({ kind }) {
   useEffect(() => {
     load();
   }, []);
+
+  // After Review now opens Rovo chat, check every 4 s (for up to 6 minutes) until the new review lands.
+  useEffect(() => {
+    if (!waitingChat) return undefined;
+    const landed = view?.review && !view.review.draft && (view.review.createdAt || '') > waitingChat.before;
+    if (landed || Date.now() - waitingChat.since > 6 * 60 * 1000) {
+      setWaitingChat(null);
+      if (landed) setNotice('The full review is in.');
+      return undefined;
+    }
+    const t = setTimeout(load, 4000);
+    return () => clearTimeout(t);
+  }, [view, waitingChat]);
 
   // Poll while a review is running, so results show as soon as they land.
   useEffect(() => {
@@ -585,6 +606,7 @@ export function SkepticApp({ kind }) {
   const openChat = async () => {
     try {
       await rovo.open({ type: 'forge', agentKey: 'skeptic-agent', agentName: 'The Skeptic', prompt: view?.agentPrompt });
+      setWaitingChat({ since: Date.now(), before: view?.review?.createdAt || '' });
     } catch {
       setError(`Open Rovo chat and ask the Skeptic: "${view?.agentPrompt}"`);
     }
@@ -653,6 +675,12 @@ export function SkepticApp({ kind }) {
           <Text>{notice}</Text>
         </SectionMessage>
       ) : null}
+      {waitingChat ? (
+        <SectionMessage appearance="information" title="The Skeptic is reviewing in Rovo chat">
+          <Text>It takes about a minute. When Rovo asks to approve "Save the Skeptic review", choose Confirm: that is Rovo checking before an app saves anything.</Text>
+          <Text>This panel updates by itself when the review is in.</Text>
+        </SectionMessage>
+      ) : null}
 
       {view.demoMode ? <DemoGuide view={view} /> : null}
 
@@ -663,13 +691,8 @@ export function SkepticApp({ kind }) {
               {review.verdict}
             </Lozenge>
             {review.draft ? <Lozenge appearance="new">draft from history</Lozenge> : null}
-            {isIssue ? (
-              view.binding ? (
-                <Lozenge appearance="removed">gate active</Lozenge>
-              ) : (
-                <Lozenge appearance="new">advisory while drafting</Lozenge>
-              )
-            ) : null}
+            {isIssue && view.binding ? <Lozenge appearance="removed">gate active</Lozenge> : null}
+            {isIssue && !view.binding && !review.draft && view.blockingCount ? <Lozenge appearance="new">must be answered before it starts</Lozenge> : null}
             {review.override ? <Lozenge appearance="moved">gate overridden</Lozenge> : null}
           </Inline>
           <Text>{summaryLine(review, view)}</Text>
@@ -684,8 +707,13 @@ export function SkepticApp({ kind }) {
         </SectionMessage>
       ) : null}
       {view.reviewRequired ? (
-        <SectionMessage appearance="warning" title="A review is required before this plan can start">
-          <Text>The radar found that your organisation has been through something like this before.</Text>
+        <SectionMessage appearance="warning" title={view.reviewRequired === 'draft' ? 'A full review is needed before this plan can start' : 'A review is needed before this plan can start'}>
+          <Text>
+            {view.reviewRequired === 'draft'
+              ? 'The draft above is a head start, not a review. Choose Full review in Rovo chat; the plan can start once that review is in and its serious objections are answered.'
+              : `${view.radarHigh ? 'The radar found that your organisation has been through something like this before. ' : ''}Choose Review now; the plan can start once the review is in and its serious objections are answered.`}
+          </Text>
+          <Text>If someone moves the plan to In Progress before then, the Skeptic moves it back.</Text>
         </SectionMessage>
       ) : null}
       {view.planChangedSinceReview ? (
